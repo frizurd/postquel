@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 
 /// Spreadsheet-style result grid backed by a view-based NSTableView.
-/// Cells are read lazily from the PGResult, so large results scroll smoothly.
+/// Cells are read lazily from the source, so large results scroll smoothly.
 struct ResultsGrid: NSViewRepresentable {
-    var result: PGResult?
+    var source: GridSource?
     var sort: GridSort? = nil
     var sortable = false
     var editable = false
@@ -15,6 +15,8 @@ struct ResultsGrid: NSViewRepresentable {
     var onSelectCell: ((CellSelection?) -> Void)? = nil
     /// Rows staged for deletion: drawn red instead of the selection color.
     var markedRows = IndexSet()
+    /// Rows kept visible after being added, drawn with a tint.
+    var pinnedRows = IndexSet()
     var onSelectRows: ((IndexSet) -> Void)? = nil
     /// ⌫ on the selected rows.
     var onDeleteRows: (() -> Void)? = nil
@@ -65,17 +67,19 @@ struct ResultsGrid: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.apply(result: result, sort: sort, linkColumns: linkColumns,
-                                  selectedCell: selectedCell, markedRows: markedRows, draftValues: draftValues)
+        context.coordinator.apply(source: source, sort: sort, linkColumns: linkColumns,
+                                  selectedCell: selectedCell, markedRows: markedRows, pinnedRows: pinnedRows,
+                                  draftValues: draftValues)
     }
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
         var parent: ResultsGrid
         weak var table: GridTableView?
-        private var result: PGResult?
+        private var result: GridSource?
         private var linkColumns: Set<Int> = []
         private var selectedCell: CellSelection?
         private var markedRows = IndexSet()
+        private var pinnedRows = IndexSet()
         private var draftValues: [Int: String]?
         private var lastClickedColumn: Int?
         private var syncingSort = false
@@ -84,14 +88,21 @@ struct ResultsGrid: NSViewRepresentable {
 
         init(parent: ResultsGrid) { self.parent = parent }
 
-        func apply(result: PGResult?, sort: GridSort?, linkColumns: Set<Int>, selectedCell: CellSelection?,
-                   markedRows: IndexSet, draftValues: [Int: String]?) {
+        func apply(source result: GridSource?, sort: GridSort?, linkColumns: Set<Int>, selectedCell: CellSelection?,
+                   markedRows: IndexSet, pinnedRows: IndexSet, draftValues: [Int: String]?) {
             guard let table else { return }
+            self.pinnedRows = pinnedRows
             let hadDraft = self.draftValues != nil
             self.draftValues = draftValues
             if hadDraft != (draftValues != nil) {
                 table.reloadData()
-                if draftValues != nil { table.scrollRowToVisible(table.numberOfRows - 1) }
+                if draftValues != nil {
+                    // Scroll again after layout: the changes bar appears at the same time and
+                    // would otherwise cover the new row.
+                    let lastRow = table.numberOfRows - 1
+                    table.scrollRowToVisible(lastRow)
+                    DispatchQueue.main.async { table.scrollRowToVisible(lastRow) }
+                }
             }
             if markedRows != self.markedRows {
                 self.markedRows = markedRows
@@ -189,6 +200,7 @@ struct ResultsGrid: NSViewRepresentable {
                 ?? MarkedRowView()
             rowView.isMarked = markedRows.contains(row)
             rowView.isDraft = row == draftRowIndex
+            rowView.isPinned = pinnedRows.contains(row)
             return rowView
         }
 
@@ -389,6 +401,13 @@ final class MarkedRowView: NSTableRowView {
         }
     }
 
+    var isPinned = false {
+        didSet {
+            guard isPinned != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         identifier = Self.reuseIdentifier
@@ -398,8 +417,8 @@ final class MarkedRowView: NSTableRowView {
 
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
-        if isDraft {
-            NSColor.systemGreen.withAlphaComponent(0.16).setFill()
+        if isDraft || isPinned {
+            NSColor.systemGreen.withAlphaComponent(isDraft ? 0.16 : 0.1).setFill()
             dirtyRect.fill()
         }
         guard isMarked else { return }

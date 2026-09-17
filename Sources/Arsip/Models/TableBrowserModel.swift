@@ -33,6 +33,11 @@ final class TableBrowserModel {
     @ObservationIgnored var onStateChange: (() -> Void)?
 
     private(set) var result: PGResult?
+    /// Rows kept visible after being inserted, until the next refresh.
+    private(set) var pinnedResult: PGResult?
+    @ObservationIgnored private var pinnedKeys: [[String]] = []
+    /// What the grid shows: the page, plus any pinned rows below it.
+    private(set) var gridSource: GridSource?
     private(set) var primaryKey: [String] = []
     private(set) var foreignKeys: [ForeignKey] = []
     private(set) var estimatedRows: Int?
@@ -87,23 +92,18 @@ final class TableBrowserModel {
     }
 
     func setDraftValue(column: Int, value: String?) {
-        guard let result, column < result.columns.count, draftRow != nil else { return }
-        draftRow?[result.columns[column].name] = value
+        guard let source = gridSource, column < source.columns.count, draftRow != nil else { return }
+        draftRow?[source.columns[column].name] = value
     }
 
     /// Draft values by result column index, for the grid.
     var draftValues: [Int: String]? {
-        guard let draftRow, let result else { return nil }
+        guard let draftRow, let source = gridSource else { return nil }
         var values: [Int: String] = [:]
-        for (index, column) in result.columns.enumerated() {
+        for (index, column) in source.columns.enumerated() {
             if let value = draftRow[column.name] ?? nil { values[index] = value }
         }
         return values
-    }
-
-    func draftValue(column: Int) -> String? {
-        guard let result, column < result.columns.count else { return nil }
-        return draftRow?[result.columns[column].name] ?? nil
     }
 
     func discardDraftRow() {
@@ -155,6 +155,10 @@ final class TableBrowserModel {
             error = message  // nothing was applied; the marks stay so the user can fix and retry
             return
         }
+        // Keep the inserted row visible even though it belongs on the last page.
+        if let inserted = outcome.results.first(where: { $0.status.hasPrefix("INSERT") })?.rows, inserted.rowCount > 0 {
+            pinnedKeys.append((0..<inserted.columns.count).compactMap { inserted.value(row: 0, column: $0) })
+        }
         let deleted = outcome.results.first(where: { $0.status.hasPrefix("DELETE") })?.affectedRows ?? 0
         error = expected == 0 || deleted == expected
             ? nil
@@ -168,7 +172,8 @@ final class TableBrowserModel {
     /// Insert first, so a new row can reuse a key that's being deleted in the same save.
     private func pendingStatements() -> [(sql: String, params: [String?])] {
         var statements: [(sql: String, params: [String?])] = []
-        if let draftRow, let insert = SQLBuilder.insert(into: relation.qualifiedName, values: draftRow) {
+        if let draftRow, let insert = SQLBuilder.insert(into: relation.qualifiedName, values: draftRow,
+                                                       returning: primaryKey) {
             statements.append(insert)
         }
         if let delete = deleteStatement() { statements.append(delete) }
@@ -224,7 +229,10 @@ final class TableBrowserModel {
         await load()
     }
 
+    /// ⌘R: also drops pinned rows, so everything sits in its real position again.
     func reload() async {
+        pinnedKeys = []
+        pinnedResult = nil
         await loadMetadata()
         await load()
     }
@@ -257,9 +265,42 @@ final class TableBrowserModel {
         }
         error = nil
         result = outcome.results.last?.rows
+        await loadPinnedRows()
+    }
+
+    /// Fetches pinned rows that aren't on this page, so a row just added stays in view.
+    private func loadPinnedRows() async {
+        guard let result else {
+            gridSource = nil
+            return
+        }
+        let onPage = Set((0..<result.rowCount).map { keyValues(of: $0, in: result) })
+        let missing = pinnedKeys.filter { !onPage.contains($0) }
+        guard !missing.isEmpty,
+              let (sql, params) = SQLBuilder.select(from: relation.qualifiedName, primaryKey: primaryKey, keys: missing)
+        else {
+            pinnedResult = nil
+            gridSource = result
+            return
+        }
+        let outcome = await connection.execute(sql, params: params)
+        if let rows = outcome.results.last?.rows, rows.rowCount > 0 {
+            pinnedResult = rows
+            gridSource = PinnedRows(page: result, pinned: rows)
+        } else {
+            pinnedResult = nil
+            gridSource = result
+        }
+    }
+
+    /// Rows displayed below the page because they were just added.
+    var pinnedRowIndices: IndexSet {
+        guard let composite = gridSource as? PinnedRows else { return IndexSet() }
+        return IndexSet(integersIn: composite.page.rowCount..<composite.rowCount)
     }
 
     func clearFilters() async {
+        pinnedKeys = []
         filters = []
         page = 0
         selectedCell = nil
@@ -268,12 +309,14 @@ final class TableBrowserModel {
     }
 
     func goToPage(_ newPage: Int) async {
+        pinnedKeys = []
         page = max(0, newPage)
         selectedCell = nil
         await load()
     }
 
     func applySort(_ newSort: GridSort?) async {
+        pinnedKeys = []
         sort = newSort
         page = 0
         selectedCell = nil

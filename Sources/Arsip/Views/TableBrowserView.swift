@@ -13,7 +13,7 @@ struct TableBrowserView: View {
                 Divider()
             }
             ResultsGrid(
-                result: model.result,
+                source: model.gridSource,
                 sort: model.sort,
                 sortable: true,
                 editable: model.canEdit,
@@ -21,6 +21,7 @@ struct TableBrowserView: View {
                 selectedCell: model.selectedCell,
                 onSelectCell: { model.selectedCell = $0 },
                 markedRows: model.markedRows,
+                pinnedRows: model.pinnedRowIndices,
                 onSelectRows: { model.selectedRows = $0 },
                 onDeleteRows: { model.markSelectedForDeletion() },
                 draftValues: model.draftValues,
@@ -154,6 +155,8 @@ struct TableBrowserView: View {
         let start = model.page * model.pageSize
         var text = "Rows \((start + 1).formatted())–\((start + result.rowCount).formatted())"
         if model.filters.isEmpty, let estimate = model.estimatedRows, estimate > 0 { text += " of ~\(estimate.formatted())" }
+        let pinned = model.pinnedRowIndices.count
+        if pinned > 0 { text += " · \(pinned) added below" }
         return text
     }
 }

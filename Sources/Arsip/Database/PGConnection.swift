@@ -17,9 +17,16 @@ struct PGColumn: Hashable {
     var isBool: Bool { typeOID == 16 }
 }
 
+/// What the grid displays: usually one query result, sometimes a result plus rows kept visible.
+protocol GridSource: AnyObject {
+    var columns: [PGColumn] { get }
+    var rowCount: Int { get }
+    func value(row: Int, column: Int) -> String?
+}
+
 /// Owns a libpq result. Results are read-only once created, so cells can be
 /// read lazily from any thread (the grid reads them on demand while scrolling).
-final class PGResult: @unchecked Sendable {
+final class PGResult: GridSource, @unchecked Sendable {
     private let handle: OpaquePointer
     let rowCount: Int
     let columns: [PGColumn]
@@ -35,6 +42,7 @@ final class PGResult: @unchecked Sendable {
     deinit { PQclear(handle) }
 
     func value(row: Int, column: Int) -> String? {
+        guard row >= 0, row < rowCount, column >= 0, column < columns.count else { return nil }
         if PQgetisnull(handle, Int32(row), Int32(column)) == 1 { return nil }
         return String(cString: PQgetvalue(handle, Int32(row), Int32(column)))
     }

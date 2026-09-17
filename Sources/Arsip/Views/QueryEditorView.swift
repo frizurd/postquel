@@ -120,7 +120,7 @@ struct QueryEditorView: View {
 
             if let rows = model.currentResult?.rows {
                 ResultsGrid(
-                    result: rows,
+                    source: rows,
                     selectedCell: model.selectedCell,
                     onSelectCell: { model.selectedCell = $0 },
                     onRequestInspector: onShowInspector

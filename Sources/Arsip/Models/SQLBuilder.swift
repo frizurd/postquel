@@ -19,12 +19,19 @@ enum SQLBuilder {
 
     /// `INSERT INTO t (cols) VALUES (...)`, leaving out columns the user didn't fill in so
     /// their defaults apply. Returns nil when nothing was filled in.
-    static func insert(into table: String, values: [String: String?]) -> (String, [String?])? {
+    static func insert(into table: String, values: [String: String?], returning: [String] = []) -> (String, [String?])? {
+        let suffix = returning.isEmpty ? "" : " RETURNING \(returning.map(quoteIdent).joined(separator: ", "))"
         let filled = values.filter { $0.value != nil }.sorted { $0.key < $1.key }
-        guard !filled.isEmpty else { return ("INSERT INTO \(table) DEFAULT VALUES", []) }
+        guard !filled.isEmpty else { return ("INSERT INTO \(table) DEFAULT VALUES\(suffix)", []) }
         let columns = filled.map { quoteIdent($0.key) }.joined(separator: ", ")
         let placeholders = (1...filled.count).map { "$\($0)" }.joined(separator: ", ")
-        return ("INSERT INTO \(table) (\(columns)) VALUES (\(placeholders))", filled.map(\.value))
+        return ("INSERT INTO \(table) (\(columns)) VALUES (\(placeholders))\(suffix)", filled.map(\.value))
+    }
+
+    /// `SELECT * FROM t WHERE (pk...) IN ((...))`, to fetch rows back by key.
+    static func select(from table: String, primaryKey: [String], keys: [[String]]) -> (String, [String?])? {
+        guard let (delete, params) = delete(from: table, primaryKey: primaryKey, keys: keys) else { return nil }
+        return (delete.replacingOccurrences(of: "DELETE FROM", with: "SELECT * FROM"), params)
     }
 
     /// Same statement with values inlined, for showing the user.

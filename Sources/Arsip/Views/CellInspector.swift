@@ -39,8 +39,8 @@ struct InspectorPanel: View {
     private var valueContent: some View {
         switch session.activeTab?.content {
         case .table(let browser):
-            if let result = browser.result, let cell = browser.selectedCell, contains(result, cell) {
-                CellEditor(result: result, cell: cell, isEditable: browser.canEdit) { value in
+            if let result = browser.gridSource, let cell = browser.selectedCell, contains(result, cell) {
+                CellEditor(source: result, cell: cell, isEditable: browser.canEdit) { value in
                     Task { await browser.update(row: cell.row, column: cell.column, value: value) }
                 }
                 // Fresh drafts whenever the cell or the loaded result changes (e.g. after saving).
@@ -50,7 +50,7 @@ struct InspectorPanel: View {
             }
         case .query(let editor):
             if let result = editor.currentResult?.rows, let cell = editor.selectedCell, contains(result, cell) {
-                CellEditor(result: result, cell: cell, isEditable: false, onSave: { _ in })
+                CellEditor(source: result, cell: cell, isEditable: false, onSave: { _ in })
                     .id(EditorIdentity(result: ObjectIdentifier(result), cell: cell))
             } else {
                 placeholder
@@ -65,7 +65,7 @@ struct InspectorPanel: View {
                                description: Text("Click a cell to view or edit its value"))
     }
 
-    private func contains(_ result: PGResult, _ cell: CellSelection) -> Bool {
+    private func contains(_ result: GridSource, _ cell: CellSelection) -> Bool {
         cell.row < result.rowCount && cell.column < result.columns.count
     }
 
@@ -86,9 +86,9 @@ struct CellEditor: View {
     @State private var text: String
     @State private var isNull: Bool
 
-    init(result: PGResult, cell: CellSelection, isEditable: Bool, onSave: @escaping (String?) -> Void) {
-        let column = result.columns[cell.column]
-        let value = result.value(row: cell.row, column: cell.column)
+    init(source: GridSource, cell: CellSelection, isEditable: Bool, onSave: @escaping (String?) -> Void) {
+        let column = source.columns[cell.column]
+        let value = source.value(row: cell.row, column: cell.column)
         let shown = value.map { column.isJSON ? JSONFormatter.pretty($0) : $0 } ?? ""
         self.column = column
         self.cell = cell
