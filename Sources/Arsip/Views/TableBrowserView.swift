@@ -23,6 +23,8 @@ struct TableBrowserView: View {
                 markedRows: model.markedRows,
                 onSelectRows: { model.selectedRows = $0 },
                 onDeleteRows: { model.markSelectedForDeletion() },
+                draftValues: model.draftValues,
+                onEditDraft: { column, value in model.setDraftValue(column: column, value: value) },
                 onRequestInspector: onShowInspector,
                 onFollowLink: { row, column in
                     if let target = model.linkTarget(row: row, column: column) {
@@ -41,28 +43,29 @@ struct TableBrowserView: View {
         }
         .task { await model.start() }
         .confirmationDialog("Unsaved deletions", isPresented: $model.confirmingRefresh) {
-            Button("Save Changes") { Task { await model.savePendingDeletions() } }
+            Button("Save Changes") { Task { await model.savePendingChanges() } }
             Button("Discard Changes", role: .destructive) {
-                model.discardPendingDeletions()
+                model.discardPendingChanges()
                 Task { await model.reload() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\(model.pendingDeletions.count) rows are marked for deletion. Reloading discards the marks unless you save them.")
+            Text("\(model.pendingSummary). Reloading discards unsaved changes.")
         }
     }
 
     private var pendingChangesBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "trash").foregroundStyle(.red)
-            Text("\(model.pendingDeletions.count) \(model.pendingDeletions.count == 1 ? "row" : "rows") marked for deletion")
+            Image(systemName: model.pendingDeletions.isEmpty ? "plus.circle" : "trash")
+                .foregroundStyle(model.pendingDeletions.isEmpty ? Color.green : Color.red)
+            Text(model.pendingSummary)
             if model.isSaving { ProgressView().controlSize(.small) }
             Spacer()
-            Button("Discard") { model.discardPendingDeletions() }
+            Button("Discard") { model.discardPendingChanges() }
             Button("SQL Preview") { showsPreview = true }
                 .popover(isPresented: $showsPreview, arrowEdge: .top) {
                     ScrollView {
-                        Text(model.pendingDeletionPreview ?? "")
+                        Text(model.pendingChangesPreview ?? "")
                             .font(.system(.callout, design: .monospaced))
                             .textSelection(.enabled)
                             .padding(12)
@@ -70,9 +73,9 @@ struct TableBrowserView: View {
                     }
                     .frame(width: 460, height: 180)
                 }
-            Button("Save Changes") { Task { await model.savePendingDeletions() } }
+            Button("Save Changes") { Task { await model.savePendingChanges() } }
                 .buttonStyle(.borderedProminent)
-                .tint(.red)
+                .tint(model.pendingDeletions.isEmpty ? .accentColor : .red)
                 .keyboardShortcut("s")
                 .help("Delete the marked rows (⌘S)")
         }
@@ -114,9 +117,14 @@ struct TableBrowserView: View {
             }
             Spacer()
             if model.canEdit {
-                Button {
-                    model.markSelectedForDeletion()
-                } label: {
+                Button { model.beginNewRow() } label: {
+                    Label("Add Row", systemImage: "plus")
+                }
+                .controlSize(.small)
+                .disabled(model.draftRow != nil)
+                .help("Add a blank row at the bottom, then ⌘S to save")
+
+                Button { model.markSelectedForDeletion() } label: {
                     Label("Delete", systemImage: "trash")
                 }
                 .controlSize(.small)

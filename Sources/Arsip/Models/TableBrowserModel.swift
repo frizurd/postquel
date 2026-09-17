@@ -44,6 +44,8 @@ final class TableBrowserModel {
     var selectedRows = IndexSet()
     /// Rows staged for deletion, held by primary key so they survive reloads.
     private(set) var pendingDeletions: Set<[String]> = []
+    /// Values typed into the blank row at the bottom; nil when there's no new row.
+    private(set) var draftRow: [String: String?]?
     /// Set when ⌘R is pressed with unsaved deletions.
     var confirmingRefresh = false
     private(set) var isSaving = false
@@ -68,7 +70,45 @@ final class TableBrowserModel {
 
     var canEdit: Bool { relation.kind == .table && !primaryKey.isEmpty }
 
-    var hasPendingChanges: Bool { !pendingDeletions.isEmpty }
+    var hasPendingChanges: Bool { !pendingDeletions.isEmpty || draftRow != nil }
+
+    var pendingSummary: String {
+        var parts: [String] = []
+        if !pendingDeletions.isEmpty {
+            parts.append("\(pendingDeletions.count) \(pendingDeletions.count == 1 ? "row" : "rows") to delete")
+        }
+        if draftRow != nil { parts.append("1 new row") }
+        return parts.joined(separator: " · ")
+    }
+
+    func beginNewRow() {
+        guard canEdit, draftRow == nil else { return }
+        draftRow = [:]
+    }
+
+    func setDraftValue(column: Int, value: String?) {
+        guard let result, column < result.columns.count, draftRow != nil else { return }
+        draftRow?[result.columns[column].name] = value
+    }
+
+    /// Draft values by result column index, for the grid.
+    var draftValues: [Int: String]? {
+        guard let draftRow, let result else { return nil }
+        var values: [Int: String] = [:]
+        for (index, column) in result.columns.enumerated() {
+            if let value = draftRow[column.name] ?? nil { values[index] = value }
+        }
+        return values
+    }
+
+    func draftValue(column: Int) -> String? {
+        guard let result, column < result.columns.count else { return nil }
+        return draftRow?[result.columns[column].name] ?? nil
+    }
+
+    func discardDraftRow() {
+        draftRow = nil
+    }
 
     /// Result rows currently staged for deletion.
     var markedRows: IndexSet {
@@ -91,28 +131,48 @@ final class TableBrowserModel {
         pendingDeletions = []
     }
 
-    /// The statement Save Changes runs, with values inlined for display.
-    var pendingDeletionPreview: String? {
-        guard let (sql, params) = deleteStatement() else { return nil }
-        return SQLBuilder.inlined(sql, params: params) + ";"
+    func discardPendingChanges() {
+        pendingDeletions = []
+        draftRow = nil
     }
 
-    func savePendingDeletions() async {
-        guard let (sql, params) = deleteStatement(), !isSaving else { return }
+    /// The statements Save Changes runs, with values inlined for display.
+    var pendingChangesPreview: String? {
+        let preview = pendingStatements().map { SQLBuilder.inlined($0.sql, params: $0.params) + ";" }
+        return preview.isEmpty ? nil : preview.joined(separator: "\n\n")
+    }
+
+    /// Applies the new row and the deletions together, in one transaction.
+    func savePendingChanges() async {
+        let statements = pendingStatements()
+        guard !statements.isEmpty, !isSaving else { return }
         isSaving = true
         defer { isSaving = false }
 
         let expected = pendingDeletions.count
-        let outcome = await connection.executeInTransaction(sql, params: params, commit: true)
+        let outcome = await connection.executeInTransaction(statements, commit: true)
         if let message = outcome.error {
-            error = message
+            error = message  // nothing was applied; the marks stay so the user can fix and retry
             return
         }
-        let deleted = outcome.results.first?.affectedRows ?? 0
-        error = deleted == expected ? nil : "Deleted \(deleted) of \(expected) rows; the others were already gone"
+        let deleted = outcome.results.first(where: { $0.status.hasPrefix("DELETE") })?.affectedRows ?? 0
+        error = expected == 0 || deleted == expected
+            ? nil
+            : "Deleted \(deleted) of \(expected) rows; the others were already gone"
         pendingDeletions = []
+        draftRow = nil
         selectedRows = IndexSet()
         await load()
+    }
+
+    /// Insert first, so a new row can reuse a key that's being deleted in the same save.
+    private func pendingStatements() -> [(sql: String, params: [String?])] {
+        var statements: [(sql: String, params: [String?])] = []
+        if let draftRow, let insert = SQLBuilder.insert(into: relation.qualifiedName, values: draftRow) {
+            statements.append(insert)
+        }
+        if let delete = deleteStatement() { statements.append(delete) }
+        return statements
     }
 
     private func deleteStatement() -> (String, [String?])? {

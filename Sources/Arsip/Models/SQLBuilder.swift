@@ -17,6 +17,16 @@ enum SQLBuilder {
         return ("DELETE FROM \(table) WHERE \(target) IN (\(tuples.joined(separator: ", ")))", params)
     }
 
+    /// `INSERT INTO t (cols) VALUES (...)`, leaving out columns the user didn't fill in so
+    /// their defaults apply. Returns nil when nothing was filled in.
+    static func insert(into table: String, values: [String: String?]) -> (String, [String?])? {
+        let filled = values.filter { $0.value != nil }.sorted { $0.key < $1.key }
+        guard !filled.isEmpty else { return ("INSERT INTO \(table) DEFAULT VALUES", []) }
+        let columns = filled.map { quoteIdent($0.key) }.joined(separator: ", ")
+        let placeholders = (1...filled.count).map { "$\($0)" }.joined(separator: ", ")
+        return ("INSERT INTO \(table) (\(columns)) VALUES (\(placeholders))", filled.map(\.value))
+    }
+
     /// Same statement with values inlined, for showing the user.
     static func inlined(_ sql: String, params: [String?]) -> String {
         var preview = sql

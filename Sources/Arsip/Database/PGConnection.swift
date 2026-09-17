@@ -149,6 +149,32 @@ final class PGConnection: @unchecked Sendable {
         }
     }
 
+    /// Runs several statements in one transaction, stopping at the first error.
+    func executeInTransaction(_ statements: [(sql: String, params: [String?])], commit: Bool,
+                              lockTimeout: String = "5s") async -> ExecutionOutcome {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                var outcome = self.executeSync("BEGIN", params: [], singleStatement: false)
+                guard outcome.error == nil else {
+                    continuation.resume(returning: outcome)
+                    return
+                }
+                _ = self.executeSync("SET LOCAL lock_timeout = '\(lockTimeout)'", params: [], singleStatement: false)
+                var results: [StatementResult] = []
+                for statement in statements {
+                    outcome = self.executeSync(statement.sql, params: statement.params, singleStatement: true)
+                    results += outcome.results
+                    if outcome.error != nil { break }
+                }
+                let end = self.executeSync(commit && outcome.error == nil ? "COMMIT" : "ROLLBACK",
+                                           params: [], singleStatement: false)
+                outcome.results = results
+                if outcome.error == nil, let error = end.error { outcome.error = error }
+                continuation.resume(returning: outcome)
+            }
+        }
+    }
+
     func silenceNotices() {
         queue.sync { _ = PQsetNoticeProcessor(conn, { _, _ in }, nil) }
     }

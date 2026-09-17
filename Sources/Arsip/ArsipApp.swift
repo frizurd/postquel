@@ -65,12 +65,12 @@ struct BrowserView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: Binding(get: { session.sidebarSelection }, set: { session.sidebarSelected($0) })) {
                 Section {
-                    Label("SQL Query", systemImage: "terminal").tag(SidebarItem.query)
+                    sidebarRow("SQL Query", symbol: "terminal").tag(SidebarItem.query)
                 }
                 ForEach(session.filteredSchemas) { group in
                     Section(group.name) {
                         ForEach(group.relations) { relation in
-                            Label(relation.name, systemImage: relation.kind.symbol)
+                            sidebarRow(relation.name, symbol: relation.kind.symbol)
                                 .tag(SidebarItem.relation(relation))
                                 .contextMenu {
                                     Button("Open in New Tab") { session.openTab(relation) }
@@ -80,7 +80,7 @@ struct BrowserView: View {
                 }
             }
             .listStyle(.sidebar)
-            .safeAreaInset(edge: .top, spacing: 0) { connectionHeader }
+            .safeAreaInset(edge: .bottom, spacing: 0) { connectionFooter }
             .searchable(text: $session.sidebarFilter, placement: .sidebar, prompt: "Filter tables")
             .navigationSplitViewColumnWidth(min: 200, ideal: 250)
             .toolbar(removing: .sidebarToggle)
@@ -157,29 +157,42 @@ struct BrowserView: View {
         .background { Color.clear.titleBarBehavior() }
     }
 
-    private var connectionHeader: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "cylinder.split.1x2.fill")
-                .font(.title3)
+    private func sidebarRow(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol)
                 .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session.config.database)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text("\(session.config.host) · \(session.connection?.serverVersion ?? "")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            Button { session.disconnect() } label: {
-                Image(systemName: "eject")
-            }
-            .buttonStyle(.borderless)
-            .help("Disconnect")
+                .frame(width: 17, alignment: .center)
+            Text(title).lineLimit(1).truncationMode(.middle)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+    }
+
+    private var connectionFooter: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 8) {
+                Image(systemName: "cylinder.split.1x2.fill")
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(session.config.database)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("\(session.config.host) · \(session.connection?.serverVersion ?? "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Button { session.disconnect() } label: {
+                    Image(systemName: "eject")
+                }
+                .buttonStyle(.borderless)
+                .help("Disconnect")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .background(.bar)
     }
 
     /// Only the active tab is rendered; its model keeps loaded rows and editor text across switches.

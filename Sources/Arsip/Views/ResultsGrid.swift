@@ -18,6 +18,9 @@ struct ResultsGrid: NSViewRepresentable {
     var onSelectRows: ((IndexSet) -> Void)? = nil
     /// ⌫ on the selected rows.
     var onDeleteRows: (() -> Void)? = nil
+    /// Blank row at the bottom for a new record: values by data column, nil when there's none.
+    var draftValues: [Int: String]? = nil
+    var onEditDraft: ((_ column: Int, _ value: String?) -> Void)? = nil
     /// Double-click on a value the grid can't edit inline (multi-line, or a read-only grid).
     var onRequestInspector: (() -> Void)? = nil
     var onFollowLink: ((_ row: Int, _ column: Int) -> Void)? = nil
@@ -63,7 +66,7 @@ struct ResultsGrid: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.apply(result: result, sort: sort, linkColumns: linkColumns,
-                                  selectedCell: selectedCell, markedRows: markedRows)
+                                  selectedCell: selectedCell, markedRows: markedRows, draftValues: draftValues)
     }
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
@@ -73,6 +76,7 @@ struct ResultsGrid: NSViewRepresentable {
         private var linkColumns: Set<Int> = []
         private var selectedCell: CellSelection?
         private var markedRows = IndexSet()
+        private var draftValues: [Int: String]?
         private var lastClickedColumn: Int?
         private var syncingSort = false
         private var editingCell: (row: Int, column: Int)?
@@ -81,8 +85,14 @@ struct ResultsGrid: NSViewRepresentable {
         init(parent: ResultsGrid) { self.parent = parent }
 
         func apply(result: PGResult?, sort: GridSort?, linkColumns: Set<Int>, selectedCell: CellSelection?,
-                   markedRows: IndexSet) {
+                   markedRows: IndexSet, draftValues: [Int: String]?) {
             guard let table else { return }
+            let hadDraft = self.draftValues != nil
+            self.draftValues = draftValues
+            if hadDraft != (draftValues != nil) {
+                table.reloadData()
+                if draftValues != nil { table.scrollRowToVisible(table.numberOfRows - 1) }
+            }
             if markedRows != self.markedRows {
                 self.markedRows = markedRows
                 table.enumerateAvailableRowViews { rowView, row in
@@ -150,11 +160,20 @@ struct ResultsGrid: NSViewRepresentable {
 
         // MARK: Data source & delegate
 
-        func numberOfRows(in tableView: NSTableView) -> Int { result?.rowCount ?? 0 }
+        private var draftRowIndex: Int? { draftValues != nil ? (result?.rowCount ?? 0) : nil }
+
+        func numberOfRows(in tableView: NSTableView) -> Int {
+            (result?.rowCount ?? 0) + (draftValues != nil ? 1 : 0)
+        }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard let result, let column = dataColumn(tableColumn) else { return nil }
             let cell = tableView.makeView(withIdentifier: GridCell.reuseIdentifier, owner: nil) as? GridCell ?? GridCell()
+            if row == draftRowIndex {
+                cell.showDraft(draftValues?[column], alignRight: result.columns[column].isNumeric)
+                cell.field.delegate = self
+                return cell
+            }
             let value = result.value(row: row, column: column)
             cell.show(value, alignRight: result.columns[column].isNumeric,
                       showsLink: value != nil && linkColumns.contains(column),
@@ -169,6 +188,7 @@ struct ResultsGrid: NSViewRepresentable {
             let rowView = tableView.makeView(withIdentifier: MarkedRowView.reuseIdentifier, owner: nil) as? MarkedRowView
                 ?? MarkedRowView()
             rowView.isMarked = markedRows.contains(row)
+            rowView.isDraft = row == draftRowIndex
             return rowView
         }
 
@@ -212,6 +232,15 @@ struct ResultsGrid: NSViewRepresentable {
 
         @objc func doubleClicked(_ sender: NSTableView) {
             let row = sender.clickedRow, columnIndex = sender.clickedColumn
+            if row == draftRowIndex, columnIndex >= 0,
+               let column = dataColumn(sender.tableColumns[columnIndex]),
+               let cell = sender.view(atColumn: columnIndex, row: row, makeIfNecessary: false) as? GridCell {
+                editingCell = (row, column)
+                editCancelled = false
+                cell.beginEditing(draftValues?[column])
+                sender.window?.makeFirstResponder(cell.field)
+                return
+            }
             guard row >= 0, columnIndex >= 0, let result,
                   let column = dataColumn(sender.tableColumns[columnIndex]),
                   let cell = sender.view(atColumn: columnIndex, row: row, makeIfNecessary: false) as? GridCell
@@ -242,6 +271,14 @@ struct ResultsGrid: NSViewRepresentable {
             guard let field = notification.object as? NSTextField, let editing = editingCell, let table, let result else { return }
             editingCell = nil
             field.isEditable = false
+
+            if editing.row == draftRowIndex {
+                if !editCancelled {
+                    parent.onEditDraft?(editing.column, field.stringValue.isEmpty ? nil : field.stringValue)
+                }
+                table.reloadData(forRowIndexes: [editing.row], columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+                return
+            }
 
             let original = result.value(row: editing.row, column: editing.column)
             let newValue = field.stringValue
@@ -345,6 +382,13 @@ final class MarkedRowView: NSTableRowView {
         }
     }
 
+    var isDraft = false {
+        didSet {
+            guard isDraft != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         identifier = Self.reuseIdentifier
@@ -354,6 +398,10 @@ final class MarkedRowView: NSTableRowView {
 
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
+        if isDraft {
+            NSColor.systemGreen.withAlphaComponent(0.16).setFill()
+            dirtyRect.fill()
+        }
         guard isMarked else { return }
         NSColor.systemRed.withAlphaComponent(0.22).setFill()
         dirtyRect.fill()
@@ -433,6 +481,25 @@ final class GridCell: NSTableCellView {
             field.textColor = .labelColor
         } else {
             field.stringValue = "NULL"
+            field.font = Self.nullFont
+            field.textColor = .tertiaryLabelColor
+        }
+    }
+
+    /// A cell of the blank row: empty means "use the column default".
+    func showDraft(_ value: String?, alignRight: Bool) {
+        field.isEditable = false
+        field.alignment = alignRight ? .right : .left
+        linkButton.isHidden = true
+        fieldToButton.isActive = false
+        fieldToEdge.isActive = true
+        layer?.borderWidth = 0
+        if let value {
+            field.stringValue = value
+            field.font = Self.font
+            field.textColor = .labelColor
+        } else {
+            field.stringValue = "default"
             field.font = Self.nullFont
             field.textColor = .tertiaryLabelColor
         }
