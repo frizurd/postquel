@@ -41,6 +41,12 @@ final class TableBrowserModel {
     private(set) var filters: [ColumnFilter]
     var error: String?
     var selectedCell: CellSelection?
+    var selectedRows = IndexSet()
+    /// Rows staged for deletion, held by primary key so they survive reloads.
+    private(set) var pendingDeletions: Set<[String]> = []
+    /// Set when ⌘R is pressed with unsaved deletions.
+    var confirmingRefresh = false
+    private(set) var isSaving = false
     var sort: GridSort?
     var page = 0
 
@@ -61,6 +67,81 @@ final class TableBrowserModel {
     }
 
     var canEdit: Bool { relation.kind == .table && !primaryKey.isEmpty }
+
+    var hasPendingChanges: Bool { !pendingDeletions.isEmpty }
+
+    /// Result rows currently staged for deletion.
+    var markedRows: IndexSet {
+        guard let result, !pendingDeletions.isEmpty else { return IndexSet() }
+        var rows = IndexSet()
+        for row in 0..<result.rowCount where pendingDeletions.contains(keyValues(of: row, in: result)) {
+            rows.insert(row)
+        }
+        return rows
+    }
+
+    func markSelectedForDeletion() {
+        guard canEdit, let result else { return }
+        for row in selectedRows where row < result.rowCount {
+            pendingDeletions.insert(keyValues(of: row, in: result))
+        }
+    }
+
+    func discardPendingDeletions() {
+        pendingDeletions = []
+    }
+
+    /// The statement Save Changes runs, with values inlined for display.
+    var pendingDeletionPreview: String? {
+        guard let (sql, params) = deleteStatement() else { return nil }
+        var preview = sql
+        for (index, value) in params.enumerated().reversed() {
+            let literal = value.map { "'" + $0.replacingOccurrences(of: "'", with: "''") + "'" } ?? "NULL"
+            preview = preview.replacingOccurrences(of: "$\(index + 1)", with: literal)
+        }
+        return preview + ";"
+    }
+
+    func savePendingDeletions() async {
+        guard let (sql, params) = deleteStatement(), !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+
+        let expected = pendingDeletions.count
+        let outcome = await connection.executeInTransaction(sql, params: params, commit: true)
+        if let message = outcome.error {
+            error = message
+            return
+        }
+        let deleted = outcome.results.first?.affectedRows ?? 0
+        error = deleted == expected ? nil : "Deleted \(deleted) of \(expected) rows; the others were already gone"
+        pendingDeletions = []
+        selectedRows = IndexSet()
+        await load()
+    }
+
+    /// One statement: `DELETE FROM t WHERE (pk...) IN ((...), (...))`.
+    private func deleteStatement() -> (String, [String?])? {
+        guard canEdit, !pendingDeletions.isEmpty else { return nil }
+        let columns = primaryKey.map(quoteIdent).joined(separator: ", ")
+        var params: [String?] = []
+        let tuples = pendingDeletions.map { key -> String in
+            let placeholders = key.map { value -> String in
+                params.append(value)
+                return "$\(params.count)"
+            }
+            return "(\(placeholders.joined(separator: ", ")))"
+        }
+        let target = primaryKey.count == 1 ? columns : "(\(columns))"
+        return ("DELETE FROM \(relation.qualifiedName) WHERE \(target) IN \(tuples.joined(separator: ", "))", params)
+    }
+
+    private func keyValues(of row: Int, in result: PGResult) -> [String] {
+        primaryKey.map { name in
+            result.columns.firstIndex { $0.name == name }
+                .flatMap { result.value(row: row, column: $0) } ?? ""
+        }
+    }
 
     var readOnlyReason: String? {
         if relation.kind != .table { return "Read-only (not a table)" }

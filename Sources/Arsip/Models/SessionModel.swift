@@ -270,8 +270,12 @@ final class SessionModel {
         }
     }
 
-    /// ⌘R: reload the table list and the active table tab.
+    /// ⌘R: reload the table list and the active table tab, asking first about unsaved deletions.
     func refresh() async {
+        if case .table(let browser) = activeTab?.content, browser.hasPendingChanges {
+            browser.confirmingRefresh = true
+            return
+        }
         await refreshCatalog()
         if case .table(let browser) = activeTab?.content {
             await browser.reload()

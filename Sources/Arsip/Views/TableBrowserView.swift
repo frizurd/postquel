@@ -4,6 +4,7 @@ struct TableBrowserView: View {
     @Bindable var model: TableBrowserModel
     var onOpenRelation: (RelationRef, [ColumnFilter]) -> Void
     var onShowInspector: () -> Void
+    @State private var showsPreview = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +20,9 @@ struct TableBrowserView: View {
                 linkColumns: model.linkColumns,
                 selectedCell: model.selectedCell,
                 onSelectCell: { model.selectedCell = $0 },
+                markedRows: model.markedRows,
+                onSelectRows: { model.selectedRows = $0 },
+                onDeleteRows: { model.markSelectedForDeletion() },
                 onRequestInspector: onShowInspector,
                 onFollowLink: { row, column in
                     if let target = model.linkTarget(row: row, column: column) {
@@ -28,10 +32,56 @@ struct TableBrowserView: View {
                 onSort: { sort in Task { await model.applySort(sort) } },
                 onEdit: { row, column, value in Task { await model.update(row: row, column: column, value: value) } }
             )
+            if model.hasPendingChanges {
+                Divider()
+                pendingChangesBar
+            }
             Divider()
             footer
         }
         .task { await model.start() }
+        .confirmationDialog("Unsaved deletions", isPresented: $model.confirmingRefresh) {
+            Button("Save Changes") { Task { await model.savePendingDeletions() } }
+            Button("Discard Changes", role: .destructive) {
+                model.discardPendingDeletions()
+                Task { await model.reload() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\(model.pendingDeletions.count) rows are marked for deletion. Reloading discards the marks unless you save them.")
+        }
+    }
+
+    private var pendingChangesBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "trash").foregroundStyle(.red)
+            Text("\(model.pendingDeletions.count) \(model.pendingDeletions.count == 1 ? "row" : "rows") marked for deletion")
+            if model.isSaving { ProgressView().controlSize(.small) }
+            Spacer()
+            Button("Discard") { model.discardPendingDeletions() }
+            Button("SQL Preview") { showsPreview = true }
+                .popover(isPresented: $showsPreview, arrowEdge: .top) {
+                    ScrollView {
+                        Text(model.pendingDeletionPreview ?? "")
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(width: 460, height: 180)
+                }
+            Button("Save Changes") { Task { await model.savePendingDeletions() } }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .keyboardShortcut("s")
+                .help("Delete the marked rows (⌘S)")
+        }
+        .font(.callout)
+        .controlSize(.small)
+        .disabled(model.isSaving)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(Color.red.opacity(0.08))
     }
 
     private var filterBar: some View {
@@ -63,6 +113,16 @@ struct TableBrowserView: View {
                 Text(model.readOnlyReason ?? "Double-click a cell to edit · right-click for more")
             }
             Spacer()
+            if model.canEdit {
+                Button {
+                    model.markSelectedForDeletion()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .controlSize(.small)
+                .disabled(model.selectedRows.isEmpty)
+                .help("Mark the selected rows for deletion (⌫)")
+            }
             if let result = model.result {
                 Text(rangeDescription(result)).monospacedDigit()
                 Text(formatDuration(model.lastDuration)).monospacedDigit()

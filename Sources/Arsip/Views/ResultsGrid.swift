@@ -13,6 +13,11 @@ struct ResultsGrid: NSViewRepresentable {
     /// The cell shown in the value inspector (row index, data column index).
     var selectedCell: CellSelection? = nil
     var onSelectCell: ((CellSelection?) -> Void)? = nil
+    /// Rows staged for deletion: drawn red instead of the selection color.
+    var markedRows = IndexSet()
+    var onSelectRows: ((IndexSet) -> Void)? = nil
+    /// ⌫ on the selected rows.
+    var onDeleteRows: (() -> Void)? = nil
     /// Double-click on a value the grid can't edit inline (multi-line, or a read-only grid).
     var onRequestInspector: (() -> Void)? = nil
     var onFollowLink: ((_ row: Int, _ column: Int) -> Void)? = nil
@@ -39,6 +44,7 @@ struct ResultsGrid: NSViewRepresentable {
         table.action = #selector(Coordinator.clicked(_:))
         table.doubleAction = #selector(Coordinator.doubleClicked(_:))
         table.copyHandler = { [weak coordinator] in coordinator?.copyRows(includeHeaders: false) }
+        table.deleteHandler = { [weak coordinator] in coordinator?.parent.onDeleteRows?() }
         let menu = NSMenu()
         menu.delegate = coordinator
         table.menu = menu
@@ -56,7 +62,8 @@ struct ResultsGrid: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.apply(result: result, sort: sort, linkColumns: linkColumns, selectedCell: selectedCell)
+        context.coordinator.apply(result: result, sort: sort, linkColumns: linkColumns,
+                                  selectedCell: selectedCell, markedRows: markedRows)
     }
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
@@ -65,6 +72,7 @@ struct ResultsGrid: NSViewRepresentable {
         private var result: PGResult?
         private var linkColumns: Set<Int> = []
         private var selectedCell: CellSelection?
+        private var markedRows = IndexSet()
         private var lastClickedColumn: Int?
         private var syncingSort = false
         private var editingCell: (row: Int, column: Int)?
@@ -72,8 +80,15 @@ struct ResultsGrid: NSViewRepresentable {
 
         init(parent: ResultsGrid) { self.parent = parent }
 
-        func apply(result: PGResult?, sort: GridSort?, linkColumns: Set<Int>, selectedCell: CellSelection?) {
+        func apply(result: PGResult?, sort: GridSort?, linkColumns: Set<Int>, selectedCell: CellSelection?,
+                   markedRows: IndexSet) {
             guard let table else { return }
+            if markedRows != self.markedRows {
+                self.markedRows = markedRows
+                table.enumerateAvailableRowViews { rowView, row in
+                    (rowView as? MarkedRowView)?.isMarked = markedRows.contains(row)
+                }
+            }
             if selectedCell != self.selectedCell {
                 let previous = self.selectedCell
                 self.selectedCell = selectedCell
@@ -150,6 +165,13 @@ struct ResultsGrid: NSViewRepresentable {
             return cell
         }
 
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            let rowView = tableView.makeView(withIdentifier: MarkedRowView.reuseIdentifier, owner: nil) as? MarkedRowView
+                ?? MarkedRowView()
+            rowView.isMarked = markedRows.contains(row)
+            return rowView
+        }
+
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
             guard !syncingSort else { return }
             let sort = tableView.sortDescriptors.first.flatMap { descriptor in
@@ -177,6 +199,7 @@ struct ResultsGrid: NSViewRepresentable {
         /// Keyboard row changes keep the last clicked column.
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard let table else { return }
+            parent.onSelectRows?(table.selectedRowIndexes)
             let row = table.selectedRow
             guard row >= 0, let result, !result.columns.isEmpty else {
                 parent.onSelectCell?(nil)
@@ -291,8 +314,53 @@ struct ResultsGrid: NSViewRepresentable {
 
 final class GridTableView: NSTableView {
     var copyHandler: (() -> Void)?
+    var deleteHandler: (() -> Void)?
 
     @objc func copy(_ sender: Any?) { copyHandler?() }
+
+    override func keyDown(with event: NSEvent) {
+        // delete / forward delete stage the selected rows for deletion
+        if event.keyCode == 51 || event.keyCode == 117, !selectedRowIndexes.isEmpty {
+            deleteHandler?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+/// Draws rows staged for deletion in red, including while selected.
+final class MarkedRowView: NSTableRowView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("MarkedRow")
+
+    var isMarked = false {
+        didSet {
+            guard isMarked != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        identifier = Self.reuseIdentifier
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        guard isMarked else { return }
+        NSColor.systemRed.withAlphaComponent(0.22).setFill()
+        dirtyRect.fill()
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isMarked else {
+            super.drawSelection(in: dirtyRect)
+            return
+        }
+        NSColor.systemRed.withAlphaComponent(0.4).setFill()
+        dirtyRect.fill()
+    }
 }
 
 final class GridCell: NSTableCellView {
