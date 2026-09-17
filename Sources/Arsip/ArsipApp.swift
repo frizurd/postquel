@@ -57,6 +57,7 @@ struct BrowserView: View {
     @AppStorage("showsInspector") private var showsInspector = false
     @AppStorage("inspectorMode") private var inspectorMode = InspectorMode.value
     @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
+    @State private var showsQuickOpen = false
 
     private var isSidebarVisible: Bool { columnVisibility != .detailOnly }
 
@@ -102,6 +103,32 @@ struct BrowserView: View {
             .animation(.snappy(duration: 0.25), value: showsInspector)
         }
         .navigationTitle(session.config.database)
+        .background {
+            // ⌘P anywhere in the window opens the table finder.
+            Button("Find Table") { showsQuickOpen = true }
+                .keyboardShortcut("p")
+                .opacity(0)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .top) {
+            if showsQuickOpen {
+                QuickOpenView(
+                    relations: session.allRelations,
+                    onOpen: { relation, inNewTab in
+                        showsQuickOpen = false
+                        if inNewTab {
+                            session.openTab(relation)
+                        } else {
+                            session.sidebarSelected(.relation(relation))
+                        }
+                    },
+                    onClose: { showsQuickOpen = false }
+                )
+                .padding(.top, 90)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.snappy(duration: 0.15), value: showsQuickOpen)
     }
 
     /// Tabs and buttons in the title bar row. The buttons are anchored to the detail column's
