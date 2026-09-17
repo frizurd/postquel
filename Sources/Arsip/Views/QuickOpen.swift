@@ -1,5 +1,28 @@
 import SwiftUI
 
+extension AnyTransition {
+    /// Fades in with a short drop into place, rather than flying in from the window's edge.
+    static var quickOpen: AnyTransition {
+        .modifier(
+            active: QuickOpenAppearance(offset: -10, opacity: 0, scale: 0.98),
+            identity: QuickOpenAppearance(offset: 0, opacity: 1, scale: 1)
+        )
+    }
+}
+
+private struct QuickOpenAppearance: ViewModifier {
+    let offset: CGFloat
+    let opacity: Double
+    let scale: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(scale, anchor: .top)
+            .offset(y: offset)
+            .opacity(opacity)
+    }
+}
+
 /// ⌘P palette: fuzzy-find a table, ↑↓ to move, ↩ to open.
 struct QuickOpenView: View {
     let relations: [RelationRef]

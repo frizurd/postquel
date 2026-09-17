@@ -44,6 +44,10 @@ struct SQLEditor: NSViewRepresentable {
         textView.textStorage?.delegate = context.coordinator
         context.coordinator.textView = textView
         textView.onRun = { [weak coordinator = context.coordinator] in coordinator?.parent.onRun() }
+        textView.rehighlight = { [weak coordinator = context.coordinator, weak textView] in
+            guard let storage = textView?.textStorage else { return }
+            SQLHighlighter.highlight(storage, active: coordinator?.activeRange)
+        }
         textView.string = text
 
         scroll.documentView = textView
@@ -93,6 +97,30 @@ struct SQLEditor: NSViewRepresentable {
 
 final class SQLTextView: NSTextView {
     var onRun: (() -> Void)?
+    /// Re-applies colors; the coordinator sets this up.
+    var rehighlight: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        // Colors can end up stale after the app sits in the background (appearance changes, window
+        // moving between spaces or screens), so re-apply them whenever the view comes back into use.
+        let center = NotificationCenter.default
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didChangeBackingPropertiesNotification] {
+            center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.rehighlight?() }
+            }
+        }
+        center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rehighlight?() }
+        }
+        rehighlight?()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        rehighlight?()
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
@@ -151,10 +179,12 @@ enum SQLHighlighter {
                 if let range = match?.range { storage.addAttribute(.foregroundColor, value: color, range: range) }
             }
         }
-        // Dim everything outside the statement that ⌘↩ would run.
-        guard let active, active.upperBound <= storage.length else { return }
+        // Dim everything outside the statement that ⌘↩ would run. Clamp rather than skip: a stale
+        // range would otherwise leave the previous dimming in place.
+        guard let active, active.location <= storage.length else { return }
+        let end = min(active.upperBound, storage.length)
         for range in [NSRange(location: 0, length: active.location),
-                      NSRange(location: active.upperBound, length: storage.length - active.upperBound)]
+                      NSRange(location: end, length: storage.length - end)]
         where range.length > 0 {
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
         }

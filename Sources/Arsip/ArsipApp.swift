@@ -125,10 +125,10 @@ struct BrowserView: View {
                     onClose: { showsQuickOpen = false }
                 )
                 .padding(.top, 90)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.quickOpen)
             }
         }
-        .animation(.snappy(duration: 0.15), value: showsQuickOpen)
+        .animation(.snappy(duration: 0.18), value: showsQuickOpen)
     }
 
     /// Tabs and buttons in the title bar row. The buttons are anchored to the detail column's
