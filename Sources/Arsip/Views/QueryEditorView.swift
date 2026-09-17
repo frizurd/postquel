@@ -6,7 +6,6 @@ struct QueryEditorView: View {
     var tables: [RelationRef] = []
     var onShowInspector: () -> Void
     @State private var showsPrompt = false
-    @State private var request = ""
 
     var body: some View {
         VSplitView {
@@ -17,7 +16,8 @@ struct QueryEditorView: View {
                     SQLPromptBar(
                         generator: generator,
                         tables: tables,
-                        request: $request,
+                        request: $model.promptDraft,
+                        statementLabel: statementLabel,
                         onGenerate: { generate(with: generator) },
                         onClose: { showsPrompt = false }
                     )
@@ -25,10 +25,8 @@ struct QueryEditorView: View {
                 }
                 SQLEditor(
                     text: $model.text,
-                    onSelectionChange: { text, range in
-                        model.selectedText = text
-                        model.selectedRange = range
-                    },
+                    activeRange: model.active?.range,
+                    onSelectionChange: { model.updateSelection(range: $0) },
                     onRun: { Task { await model.runCurrent() } }
                 )
             }
@@ -37,7 +35,10 @@ struct QueryEditorView: View {
             resultsPane
                 .frame(minHeight: 140)
         }
-        .onChange(of: model.text) { model.onTextChange?() }
+        .onChange(of: model.text) {
+            model.refreshActiveStatement()
+            model.onTextChange?()
+        }
     }
 
     private var editorBar: some View {
@@ -60,7 +61,7 @@ struct QueryEditorView: View {
                 .keyboardShortcut("l")
                 .help("Describe the query you want (⌘L)")
             }
-            Text("⌘↩ runs the selection or everything")
+            Text(statementLabel.map { "⌘↩ runs \($0.lowercased())" } ?? "⌘↩ runs the statement at the cursor")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -69,8 +70,15 @@ struct QueryEditorView: View {
         .frame(height: 34)
     }
 
+    /// "Statement 2 of 3" while there's more than one.
+    private var statementLabel: String? {
+        guard let active = model.active else { return nil }
+        let total = SQLStatements.ranges(in: model.text).count
+        return total > 1 ? "Statement \(active.index + 1) of \(total)" : nil
+    }
+
     private func generate(with generator: SQLGenerator) {
-        let request = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = model.promptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty, !generator.isRunning else { return }
         // "@public.orders" / "@orders" reference tables; send the names along, without the @.
         let mentions = request.mentionedNames()
@@ -80,7 +88,7 @@ struct QueryEditorView: View {
         let plain = request.replacingOccurrences(of: "@", with: "")
 
         Task {
-            if let sql = await generator.generate(request: plain, currentSQL: model.text,
+            if let sql = await generator.generate(request: plain, currentSQL: model.activeStatementText ?? "",
                                                   mentionedTables: Array(Set(resolved)).sorted()) {
                 model.applyGenerated(sql)
             }
@@ -139,6 +147,9 @@ struct QueryEditorView: View {
                 Text(error).foregroundStyle(.red).lineLimit(1).truncationMode(.tail).help(error)
             } else if let result = model.currentResult {
                 Text(result.rows.map { rowCountText($0.rowCount) } ?? result.status)
+                if let note = model.lastRunNote {
+                    Text("· \(note)")
+                }
             }
             Spacer()
             if let duration = model.duration {

@@ -4,7 +4,9 @@ import SwiftUI
 /// Plain NSTextView with SQL highlighting and ⌘↩ to run.
 struct SQLEditor: NSViewRepresentable {
     @Binding var text: String
-    var onSelectionChange: (String?, NSRange) -> Void
+    /// Statement to keep at full contrast; everything else is dimmed.
+    var activeRange: NSRange?
+    var onSelectionChange: (NSRange) -> Void
     var onRun: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -40,6 +42,7 @@ struct SQLEditor: NSViewRepresentable {
 
         textView.delegate = context.coordinator
         textView.textStorage?.delegate = context.coordinator
+        context.coordinator.textView = textView
         textView.onRun = { [weak coordinator = context.coordinator] in coordinator?.parent.onRun() }
         textView.string = text
 
@@ -49,7 +52,12 @@ struct SQLEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        guard let textView = scroll.documentView as? SQLTextView, textView.string != text else { return }
+        guard let textView = scroll.documentView as? SQLTextView else { return }
+        if context.coordinator.activeRange != activeRange {
+            context.coordinator.activeRange = activeRange
+            if let storage = textView.textStorage { SQLHighlighter.highlight(storage, active: activeRange) }
+        }
+        guard textView.string != text else { return }
         // Replace through the text storage so generated SQL can be undone with ⌘Z.
         let whole = NSRange(location: 0, length: (textView.string as NSString).length)
         if textView.shouldChangeText(in: whole, replacementString: text) {
@@ -60,6 +68,8 @@ struct SQLEditor: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         var parent: SQLEditor
+        var activeRange: NSRange?
+        weak var textView: SQLTextView?
 
         init(parent: SQLEditor) { self.parent = parent }
 
@@ -70,14 +80,13 @@ struct SQLEditor: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            let range = textView.selectedRange()
-            parent.onSelectionChange(range.length > 0 ? (textView.string as NSString).substring(with: range) : nil, range)
+            parent.onSelectionChange(textView.selectedRange())
         }
 
         func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
                          range editedRange: NSRange, changeInLength delta: Int) {
             guard editedMask.contains(.editedCharacters) else { return }
-            SQLHighlighter.highlight(textStorage)
+            SQLHighlighter.highlight(textStorage, active: activeRange)
         }
     }
 }
@@ -132,7 +141,7 @@ enum SQLHighlighter {
         try! NSRegularExpression(pattern: pattern, options: options)
     }
 
-    static func highlight(_ storage: NSTextStorage) {
+    static func highlight(_ storage: NSTextStorage, active: NSRange? = nil) {
         let full = NSRange(location: 0, length: storage.length)
         // Colors only: overriding the font would break glyph fallback (e.g. ⌘ ↩ in comments).
         storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: full)
@@ -141,6 +150,13 @@ enum SQLHighlighter {
             regex.enumerateMatches(in: storage.string, range: full) { match, _, _ in
                 if let range = match?.range { storage.addAttribute(.foregroundColor, value: color, range: range) }
             }
+        }
+        // Dim everything outside the statement that ⌘↩ would run.
+        guard let active, active.upperBound <= storage.length else { return }
+        for range in [NSRange(location: 0, length: active.location),
+                      NSRange(location: active.upperBound, length: storage.length - active.upperBound)]
+        where range.length > 0 {
+            storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
         }
     }
 }

@@ -7,8 +7,11 @@ final class QueryEditorModel {
 
     @ObservationIgnored var connection: PGConnection?
     /// Current editor selection; updated on every caret move, so not observed.
-    @ObservationIgnored var selectedText: String?
-    @ObservationIgnored var selectedRange = NSRange(location: 0, length: 0)
+    @ObservationIgnored private var selectedRange = NSRange(location: 0, length: 0)
+    /// The statement ⌘↩ runs and the AI bar edits.
+    private(set) var active: SQLStatements.Active?
+    /// One AI prompt draft per statement, so switching statements switches drafts.
+    private var prompts: [Int: String] = [:]
     @ObservationIgnored var onTextChange: (() -> Void)?
 
     var text: String
@@ -16,6 +19,8 @@ final class QueryEditorModel {
     private(set) var results: [StatementResult] = []
     private(set) var error: String?
     private(set) var duration: TimeInterval?
+    /// Note about what ⌘↩ actually ran, e.g. when several statements were selected.
+    private(set) var lastRunNote: String?
     var selectedResultIndex = 0 {
         didSet { selectedCell = nil }
     }
@@ -24,7 +29,7 @@ final class QueryEditorModel {
     init(restoreSavedText: Bool = false) {
         text = restoreSavedText
             ? UserDefaults.standard.string(forKey: Self.textKey)
-                ?? "-- ⌘↩ runs the selection, or everything if nothing is selected\nSELECT now(), version();\n"
+                ?? "-- ⌘↩ runs the statement the cursor is in\nSELECT now(), version();\n"
             : ""
     }
 
@@ -36,9 +41,34 @@ final class QueryEditorModel {
         results.indices.contains(selectedResultIndex) ? results[selectedResultIndex] : nil
     }
 
+    var activeStatementText: String? {
+        guard let active else { return nil }
+        return (text as NSString).substring(with: active.range)
+    }
+
+    /// The AI prompt for the statement in focus.
+    var promptDraft: String {
+        get { prompts[active?.index ?? 0] ?? "" }
+        set { prompts[active?.index ?? 0] = newValue }
+    }
+
+    func updateSelection(range: NSRange) {
+        selectedRange = range
+        refreshActiveStatement()
+    }
+
+    func refreshActiveStatement() {
+        active = SQLStatements.active(in: text, for: selectedRange)
+    }
+
+    /// Runs exactly one statement: the selection, or the one the caret is in.
     func runCurrent() async {
-        let selection = selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        await run(selection.isEmpty ? text : selection)
+        refreshActiveStatement()
+        guard let statement = activeStatementText, let active else { return }
+        lastRunNote = active.selectedCount > 1
+            ? "Ran the first of \(active.selectedCount) selected statements"
+            : nil
+        await run(statement)
     }
 
     func run(_ sql: String) async {
@@ -56,16 +86,19 @@ final class QueryEditorModel {
         selectedResultIndex = rowResultIndices.last ?? max(0, results.count - 1)
     }
 
-    /// Puts generated SQL in the editor: over the selection, or appended when there's other text.
+    /// Replaces the statement in focus with generated SQL (or inserts it in an empty editor).
     func applyGenerated(_ sql: String) {
         let current = text as NSString
-        if selectedRange.length > 0, selectedRange.upperBound <= current.length {
-            text = current.replacingCharacters(in: selectedRange, with: sql)
+        if let range = active?.range, range.upperBound <= current.length {
+            text = current.replacingCharacters(in: range, with: sql)
+            selectedRange = NSRange(location: range.location, length: (sql as NSString).length)
         } else if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             text = sql
+            selectedRange = NSRange(location: 0, length: 0)
         } else {
             text = text + (text.hasSuffix("\n") ? "\n" : "\n\n") + sql
         }
+        refreshActiveStatement()
         onTextChange?()
     }
 

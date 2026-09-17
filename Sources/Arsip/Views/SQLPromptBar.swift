@@ -6,6 +6,8 @@ struct SQLPromptBar: View {
     @Bindable var generator: SQLGenerator
     let tables: [RelationRef]
     @Binding var request: String
+    /// "Statement 2 of 3", when the editor holds more than one.
+    var statementLabel: String?
     var onGenerate: () -> Void
     var onClose: () -> Void
     @FocusState private var isFocused: Bool
@@ -41,6 +43,11 @@ struct SQLPromptBar: View {
                 .help("Close (esc)")
             }
 
+            if let statementLabel {
+                Label("Editing \(statementLabel.lowercased()) — it will be replaced", systemImage: "text.insert")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let error = generator.error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
