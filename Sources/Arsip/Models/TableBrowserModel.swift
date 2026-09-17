@@ -94,12 +94,7 @@ final class TableBrowserModel {
     /// The statement Save Changes runs, with values inlined for display.
     var pendingDeletionPreview: String? {
         guard let (sql, params) = deleteStatement() else { return nil }
-        var preview = sql
-        for (index, value) in params.enumerated().reversed() {
-            let literal = value.map { "'" + $0.replacingOccurrences(of: "'", with: "''") + "'" } ?? "NULL"
-            preview = preview.replacingOccurrences(of: "$\(index + 1)", with: literal)
-        }
-        return preview + ";"
+        return SQLBuilder.inlined(sql, params: params) + ";"
     }
 
     func savePendingDeletions() async {
@@ -120,20 +115,9 @@ final class TableBrowserModel {
         await load()
     }
 
-    /// One statement: `DELETE FROM t WHERE (pk...) IN ((...), (...))`.
     private func deleteStatement() -> (String, [String?])? {
         guard canEdit, !pendingDeletions.isEmpty else { return nil }
-        let columns = primaryKey.map(quoteIdent).joined(separator: ", ")
-        var params: [String?] = []
-        let tuples = pendingDeletions.map { key -> String in
-            let placeholders = key.map { value -> String in
-                params.append(value)
-                return "$\(params.count)"
-            }
-            return "(\(placeholders.joined(separator: ", ")))"
-        }
-        let target = primaryKey.count == 1 ? columns : "(\(columns))"
-        return ("DELETE FROM \(relation.qualifiedName) WHERE \(target) IN \(tuples.joined(separator: ", "))", params)
+        return SQLBuilder.delete(from: relation.qualifiedName, primaryKey: primaryKey, keys: Array(pendingDeletions))
     }
 
     private func keyValues(of row: Int, in result: PGResult) -> [String] {
