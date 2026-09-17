@@ -8,6 +8,7 @@ final class QueryEditorModel {
     @ObservationIgnored var connection: PGConnection?
     /// Current editor selection; updated on every caret move, so not observed.
     @ObservationIgnored var selectedText: String?
+    @ObservationIgnored var selectedRange = NSRange(location: 0, length: 0)
     @ObservationIgnored var onTextChange: (() -> Void)?
 
     var text: String
@@ -53,6 +54,19 @@ final class QueryEditorModel {
         error = outcome.error
         duration = outcome.duration
         selectedResultIndex = rowResultIndices.last ?? max(0, results.count - 1)
+    }
+
+    /// Puts generated SQL in the editor: over the selection, or appended when there's other text.
+    func applyGenerated(_ sql: String) {
+        let current = text as NSString
+        if selectedRange.length > 0, selectedRange.upperBound <= current.length {
+            text = current.replacingCharacters(in: selectedRange, with: sql)
+        } else if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            text = sql
+        } else {
+            text = text + (text.hasSuffix("\n") ? "\n" : "\n\n") + sql
+        }
+        onTextChange?()
     }
 
     func cancel() {

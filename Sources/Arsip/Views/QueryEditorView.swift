@@ -2,16 +2,33 @@ import SwiftUI
 
 struct QueryEditorView: View {
     @Bindable var model: QueryEditorModel
+    var generator: SQLGenerator?
+    var tables: [RelationRef] = []
     var onShowInspector: () -> Void
+    @State private var showsPrompt = false
+    @State private var request = ""
 
     var body: some View {
         VSplitView {
             VStack(spacing: 0) {
                 editorBar
                 Divider()
+                if let generator, showsPrompt {
+                    SQLPromptBar(
+                        generator: generator,
+                        tables: tables,
+                        request: $request,
+                        onGenerate: { generate(with: generator) },
+                        onClose: { showsPrompt = false }
+                    )
+                    Divider()
+                }
                 SQLEditor(
                     text: $model.text,
-                    onSelectionChange: { model.selectedText = $0 },
+                    onSelectionChange: { text, range in
+                        model.selectedText = text
+                        model.selectedRange = range
+                    },
                     onRun: { Task { await model.runCurrent() } }
                 )
             }
@@ -36,6 +53,13 @@ struct QueryEditorView: View {
                 }
                 .help("Run selection, or the whole editor (⌘↩)")
             }
+            if generator != nil {
+                Button { showsPrompt.toggle() } label: {
+                    Label("Ask AI", systemImage: "sparkles")
+                }
+                .keyboardShortcut("l")
+                .help("Describe the query you want (⌘L)")
+            }
             Text("⌘↩ runs the selection or everything")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -43,6 +67,24 @@ struct QueryEditorView: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 34)
+    }
+
+    private func generate(with generator: SQLGenerator) {
+        let request = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty, !generator.isRunning else { return }
+        // "@public.orders" / "@orders" reference tables; send the names along, without the @.
+        let mentions = request.mentionedNames()
+        let resolved = mentions.compactMap { mention in
+            tables.first { $0.name == mention || "\($0.schema).\($0.name)" == mention }
+        }.map { "\($0.schema).\($0.name)" }
+        let plain = request.replacingOccurrences(of: "@", with: "")
+
+        Task {
+            if let sql = await generator.generate(request: plain, currentSQL: model.text,
+                                                  mentionedTables: Array(Set(resolved)).sorted()) {
+                model.applyGenerated(sql)
+            }
+        }
     }
 
     @ViewBuilder

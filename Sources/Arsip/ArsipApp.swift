@@ -175,7 +175,8 @@ struct BrowserView: View {
     private func tabView(_ tab: WorkspaceTab) -> some View {
         switch tab.content {
         case .query(let editor):
-            QueryEditorView(model: editor, onShowInspector: showValueInspector)
+            QueryEditorView(model: editor, generator: session.sqlGenerator, tables: session.allRelations,
+                            onShowInspector: showValueInspector)
         case .table(let browser):
             TableBrowserView(
                 model: browser,

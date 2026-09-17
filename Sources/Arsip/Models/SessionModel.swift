@@ -144,9 +144,12 @@ final class SessionModel {
     private(set) var tabs: [WorkspaceTab] = []
     private(set) var activeTabID: UUID?
     private(set) var assistant: AssistantModel?
+    private(set) var sqlGenerator: SQLGenerator?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
     var isConnected: Bool { connection != nil }
+
+    var allRelations: [RelationRef] { schemas.flatMap(\.relations) }
 
     var filteredSchemas: [SchemaGroup] {
         let filter = sidebarFilter.trimmingCharacters(in: .whitespaces)
@@ -194,6 +197,7 @@ final class SessionModel {
                 await self?.runProposedChange(sql, commit: commit) ?? ExecutionOutcome(error: "Not connected")
             }
             self.assistant = assistant
+            sqlGenerator = SQLGenerator(config: attempt)
             restoreWorkspace()
             await refreshCatalog()
         } catch {
@@ -206,6 +210,8 @@ final class SessionModel {
         UserDefaults.standard.set(false, forKey: Self.reconnectKey)
         assistant?.stop()
         assistant = nil
+        sqlGenerator?.cancel()
+        sqlGenerator = nil
         tabs = []
         activeTabID = nil
         connection = nil

@@ -4,7 +4,7 @@ import SwiftUI
 /// Plain NSTextView with SQL highlighting and ⌘↩ to run.
 struct SQLEditor: NSViewRepresentable {
     @Binding var text: String
-    var onSelectionChange: (String?) -> Void
+    var onSelectionChange: (String?, NSRange) -> Void
     var onRun: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -50,7 +50,12 @@ struct SQLEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scroll.documentView as? SQLTextView, textView.string != text else { return }
-        textView.string = text
+        // Replace through the text storage so generated SQL can be undone with ⌘Z.
+        let whole = NSRange(location: 0, length: (textView.string as NSString).length)
+        if textView.shouldChangeText(in: whole, replacementString: text) {
+            textView.textStorage?.replaceCharacters(in: whole, with: text)
+            textView.didChangeText()
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
@@ -66,7 +71,7 @@ struct SQLEditor: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             let range = textView.selectedRange()
-            parent.onSelectionChange(range.length > 0 ? (textView.string as NSString).substring(with: range) : nil)
+            parent.onSelectionChange(range.length > 0 ? (textView.string as NSString).substring(with: range) : nil, range)
         }
 
         func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
