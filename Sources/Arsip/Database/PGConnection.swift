@@ -125,6 +125,30 @@ final class PGConnection: @unchecked Sendable {
         queue.sync { executeSync(sql, params: params, singleStatement: singleStatement) }
     }
 
+    /// Runs one statement in its own transaction on the connection's queue, so nothing else can
+    /// interleave, then commits or rolls back. Waits at most `lockTimeout` for locks.
+    func executeInTransaction(_ sql: String, commit: Bool, lockTimeout: String = "5s",
+                              statementTimeout: String? = nil) async -> ExecutionOutcome {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                var outcome = self.executeSync("BEGIN", params: [], singleStatement: false)
+                guard outcome.error == nil else {
+                    continuation.resume(returning: outcome)
+                    return
+                }
+                _ = self.executeSync("SET LOCAL lock_timeout = '\(lockTimeout)'", params: [], singleStatement: false)
+                if let statementTimeout {
+                    _ = self.executeSync("SET LOCAL statement_timeout = '\(statementTimeout)'", params: [], singleStatement: false)
+                }
+                outcome = self.executeSync(sql, params: [], singleStatement: true)
+                let end = self.executeSync(commit && outcome.error == nil ? "COMMIT" : "ROLLBACK",
+                                           params: [], singleStatement: false)
+                if outcome.error == nil, let error = end.error { outcome.error = error }
+                continuation.resume(returning: outcome)
+            }
+        }
+    }
+
     func silenceNotices() {
         queue.sync { _ = PQsetNoticeProcessor(conn, { _, _ in }, nil) }
     }

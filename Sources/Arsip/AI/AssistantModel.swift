@@ -15,6 +15,8 @@ final class AssistantModel {
         let name: String
         /// The SQL or table name the tool was called with.
         let detail: String
+        /// For propose_change: the one-line description of the change.
+        var summary: String?
         var output: String?
         var isError = false
 
@@ -26,6 +28,7 @@ final class AssistantModel {
             case "explain_query": "Explained query"
             case "open_table": "Opened \(detail)"
             case "open_query_tab": "Opened query tab"
+            case "propose_change": "Proposed change"
             default: name
             }
         }
@@ -37,13 +40,31 @@ final class AssistantModel {
             case "run_query": "play"
             case "explain_query": "gauge.with.dots.needle.33percent"
             case "open_table", "open_query_tab": "arrow.up.right.square"
+            case "propose_change": "pencil.and.list.clipboard"
             default: "wrench"
             }
         }
 
         var showsSQL: Bool {
-            ["run_query", "explain_query", "open_query_tab"].contains(name)
+            ["run_query", "explain_query", "open_query_tab", "propose_change"].contains(name)
         }
+
+        /// Statement keyword and planner estimate reported by the server for a proposal.
+        var proposalStatement: String? { outputLine(after: "Statement: ") }
+        var proposalEstimate: String? { outputLine(after: "Planner estimate: ") }
+
+        private func outputLine(after prefix: String) -> String? {
+            output?.components(separatedBy: "\n").first { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+        }
+    }
+
+    enum ProposalState: Equatable {
+        case pending
+        case running(apply: Bool)
+        case dryRan(String)
+        case applied(String)
+        case failed(String)
+        case dismissed
     }
 
     enum Block: Identifiable {
@@ -70,6 +91,7 @@ final class AssistantModel {
     private(set) var error: String?
     /// Bumped on every streamed change, so the transcript can follow along.
     private(set) var revision = 0
+    private(set) var proposalStates: [String: ProposalState] = [:]
     var draft = ""
 
     let databaseName: String
@@ -78,6 +100,10 @@ final class AssistantModel {
     /// Performs `open_table` / `open_query_tab` in the window once the tool call succeeded.
     @ObservationIgnored var onAction: ((AssistantAction) -> Void)?
     @ObservationIgnored private var toolInputs: [String: [String: Any]] = [:]
+    /// Runs a proposed statement in a transaction on the user's connection; `commit: false` rolls back.
+    @ObservationIgnored var changeRunner: ((_ sql: String, _ commit: Bool) async -> ExecutionOutcome)?
+    /// What happened to proposals since the last prompt, told to Claude on the next turn.
+    @ObservationIgnored private var notes: [String] = []
 
     @ObservationIgnored private let config: ConnectionConfig
     @ObservationIgnored private let serverVersion: String
@@ -115,6 +141,8 @@ final class AssistantModel {
     func newConversation() {
         stop()
         messages = []
+        proposalStates = [:]
+        notes = []
         sessionID = nil
         error = nil
         revision += 1
@@ -211,8 +239,55 @@ final class AssistantModel {
     }
 
     private func promptWithContext(_ prompt: String) -> String {
-        guard let context = contextProvider?(), !context.isEmpty else { return prompt }
-        return "<arsip_context>\n\(context)\n</arsip_context>\n\n\(prompt)"
+        let context = ([contextProvider?()].compactMap { $0 } + notes).filter { !$0.isEmpty }
+        notes = []
+        guard !context.isEmpty else { return prompt }
+        return "<arsip_context>\n\(context.joined(separator: "\n"))\n</arsip_context>\n\n\(prompt)"
+    }
+
+    // MARK: Proposed changes
+
+    func dryRun(_ call: ToolCall) {
+        run(call, apply: false)
+    }
+
+    func apply(_ call: ToolCall) {
+        run(call, apply: true)
+    }
+
+    func dismiss(_ call: ToolCall) {
+        proposalStates[call.id] = .dismissed
+        notes.append("The user dismissed your proposed change: \(call.summary ?? call.detail)")
+    }
+
+    private func run(_ call: ToolCall, apply: Bool) {
+        guard let changeRunner, proposalStates[call.id].map(Self.canRun) ?? true else { return }
+        proposalStates[call.id] = .running(apply: apply)
+        Task {
+            let outcome = await changeRunner(call.detail, apply)
+            if let error = outcome.error {
+                proposalStates[call.id] = .failed(error)
+                if apply { notes.append("Applying your proposed change failed: \(error)") }
+                return
+            }
+            let result = outcome.results.last
+            if apply {
+                proposalStates[call.id] = .applied(result?.status ?? "Done")
+                notes.append("The user applied your proposed change (\(call.summary ?? call.detail)): \(result?.status ?? "done")")
+            } else if let rows = result?.affectedRows,
+                      ["INSERT", "UPDATE", "DELETE", "MERGE"].contains(where: { result?.status.hasPrefix($0) == true }) {
+                proposalStates[call.id] = .dryRan("Would affect \(rows.formatted()) \(rows == 1 ? "row" : "rows")")
+            } else {
+                proposalStates[call.id] = .dryRan("Ran without errors (\(result?.status ?? "OK")), then rolled back")
+            }
+        }
+    }
+
+    private static func canRun(_ state: ProposalState) -> Bool {
+        switch state {
+        case .pending, .dryRan, .failed: true
+        case .running, .applied, .dismissed: false
+        }
     }
 
     private var systemPrompt: String {
@@ -225,8 +300,10 @@ final class AssistantModel {
         - Your access is read-only. If the user wants to change data or schema, write the SQL for them to review \
         and run themselves, and say what it will affect.
         - When the user wants to see rows, open them with open_table (use filters for specific rows) instead of \
-        pasting long results. Use open_query_tab for longer queries and for any change you propose; it isn't run \
-        until the user runs it.
+        pasting long results. Use open_query_tab for longer read queries.
+        - For any data or schema change, call propose_change once per statement with a short summary. The user \
+        reviews it as a card, can dry-run it for the exact row count, and applies it themselves. Mention risks \
+        (locks on big tables, irreversible deletes) briefly.
         - Be concise. Put short SQL in ```sql code blocks (the user can open them in a query tab). \
         Use small markdown tables for small results.
         - <arsip_context> describes what the user currently has open in Arsip.
@@ -286,8 +363,9 @@ final class AssistantModel {
                 let input = block["input"] as? [String: Any] ?? [:]
                 let name = (block["name"] as? String ?? "").replacingOccurrences(of: "mcp__arsip__", with: "")
                 toolInputs[id] = input
+                if name == "propose_change" { proposalStates[id] = .pending }
                 let detail = input["sql"] as? String ?? input["table"] as? String ?? input["schema"] as? String ?? ""
-                appendBlock(.tool(ToolCall(id: id, name: name, detail: detail)))
+                appendBlock(.tool(ToolCall(id: id, name: name, detail: detail, summary: input["summary"] as? String)))
             }
 
         case "user":

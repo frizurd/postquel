@@ -190,6 +190,9 @@ final class SessionModel {
             assistant.onAction = { [weak self] action in
                 Task { await self?.perform(action) }
             }
+            assistant.changeRunner = { [weak self] sql, commit in
+                await self?.runProposedChange(sql, commit: commit) ?? ExecutionOutcome(error: "Not connected")
+            }
             self.assistant = assistant
             restoreWorkspace()
             await refreshCatalog()
@@ -207,6 +210,20 @@ final class SessionModel {
         activeTabID = nil
         connection = nil
         schemas = []
+    }
+
+    /// Dry runs roll back and give up after 30s; applied changes refresh what's on screen.
+    private func runProposedChange(_ sql: String, commit: Bool) async -> ExecutionOutcome {
+        guard let connection else { return ExecutionOutcome(error: "Not connected") }
+        let keyword = MCPServer.firstKeyword(sql)
+        guard !["BEGIN", "START", "COMMIT", "END", "ROLLBACK", "ABORT", "SAVEPOINT", "RELEASE"].contains(keyword) else {
+            return ExecutionOutcome(error: "Transaction commands can't be applied from a proposal")
+        }
+        let outcome = await connection.executeInTransaction(sql, commit: commit, statementTimeout: commit ? nil : "30s")
+        if commit, outcome.error == nil {
+            await refresh()
+        }
+        return outcome
     }
 
     private func perform(_ action: AssistantAction) async {

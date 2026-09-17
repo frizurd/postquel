@@ -106,6 +106,7 @@ struct AssistantPanel: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(model.messages) { message in
                         MessageView(
+                            model: model,
                             message: message,
                             isStreaming: model.isRunning && message.id == model.messages.last?.id,
                             onOpenSQL: onOpenSQL
@@ -180,6 +181,7 @@ struct AssistantPanel: View {
 }
 
 private struct MessageView: View {
+    let model: AssistantModel
     let message: AssistantModel.Message
     let isStreaming: Bool
     let onOpenSQL: (String) -> Void
@@ -202,7 +204,11 @@ private struct MessageView: View {
                     case .text(_, let text):
                         MarkdownView(text: text, onOpenSQL: onOpenSQL)
                     case .tool(let call):
-                        ToolCallView(call: call, isRunning: isStreaming)
+                        if call.name == "propose_change", call.output != nil, !call.isError {
+                            ProposalCard(model: model, call: call, onOpenSQL: onOpenSQL)
+                        } else {
+                            ToolCallView(call: call, isRunning: isStreaming)
+                        }
                     }
                 }
                 if isStreaming, message.blocks.isEmpty || message.blocks.last.map(isFinishedTool) == true {
@@ -218,6 +224,122 @@ private struct MessageView: View {
     private func isFinishedTool(_ block: AssistantModel.Block) -> Bool {
         if case .tool(let call) = block { return call.output != nil }
         return false
+    }
+}
+
+/// A change Claude proposed: review, dry-run, apply or dismiss.
+private struct ProposalCard: View {
+    let model: AssistantModel
+    let call: AssistantModel.ToolCall
+    let onOpenSQL: (String) -> Void
+    @State private var confirmingApply = false
+
+    private var state: AssistantModel.ProposalState { model.proposalStates[call.id] ?? .pending }
+
+    private var isRunning: Bool {
+        if case .running = state { return true }
+        return false
+    }
+
+    private var isFinal: Bool {
+        switch state {
+        case .applied, .dismissed: true
+        default: false
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "pencil.and.list.clipboard").foregroundStyle(.orange)
+                Text("Proposed change").font(.callout.weight(.semibold))
+                if let statement = call.proposalStatement {
+                    Text(statement)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.orange.opacity(0.15)))
+                }
+                Spacer()
+            }
+
+            if let summary = call.summary, !summary.isEmpty {
+                Text(summary).font(.callout)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(call.detail)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: true)
+                    .padding(8)
+            }
+            .frame(maxHeight: 180)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .textBackgroundColor)))
+
+            statusLine
+
+            if !isFinal {
+                HStack(spacing: 6) {
+                    Button("Dry Run") { model.dryRun(call) }
+                        .help("Run in a transaction and roll back, to see exactly what it affects")
+                    Button("Apply…") { confirmingApply = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                    Spacer()
+                    Menu {
+                        Button("Open in Query Tab") { onOpenSQL(call.detail) }
+                        Button("Dismiss") { model.dismiss(call) }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                }
+                .controlSize(.small)
+                .disabled(isRunning)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.orange.opacity(0.35)))
+        .opacity(state == .dismissed ? 0.55 : 1)
+        .confirmationDialog("Apply this change to \(model.databaseName)?", isPresented: $confirmingApply) {
+            Button("Apply", role: .destructive) { model.apply(call) }
+        } message: {
+            Text("It runs in a transaction and commits immediately. This can't be undone from Arsip.")
+        }
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        HStack(spacing: 6) {
+            switch state {
+            case .pending:
+                if let estimate = call.proposalEstimate {
+                    Image(systemName: "chart.bar").foregroundStyle(.secondary)
+                    Text("Planner estimate: \(estimate)").foregroundStyle(.secondary)
+                }
+            case .running(let apply):
+                ProgressView().controlSize(.mini)
+                Text(apply ? "Applying…" : "Dry running…").foregroundStyle(.secondary)
+            case .dryRan(let message):
+                Image(systemName: "checkmark.circle").foregroundStyle(.blue)
+                Text("Dry run: \(message)")
+            case .applied(let status):
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Applied · \(status)")
+            case .failed(let message):
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                Text(message).foregroundStyle(.red).textSelection(.enabled)
+            case .dismissed:
+                Image(systemName: "xmark.circle").foregroundStyle(.secondary)
+                Text("Dismissed").foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
     }
 }
 

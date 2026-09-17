@@ -175,11 +175,26 @@ final class MCPServer {
         [
             "name": "open_query_tab",
             "description": "Open SQL in a new query tab in the user's Arsip window for them to review and run. "
-                + "It is not executed. Use for longer queries and for any data or schema changes you propose.",
+                + "It is not executed. Use for longer read queries; use propose_change for changes.",
             "inputSchema": [
                 "type": "object",
                 "properties": ["sql": ["type": "string", "description": "The SQL to put in the tab"]],
                 "required": ["sql"],
+            ],
+        ],
+        [
+            "name": "propose_change",
+            "description": "Propose ONE data or schema change (INSERT, UPDATE, DELETE, MERGE, CREATE, ALTER, DROP, ...) "
+                + "for the user to review. It is NOT applied: Arsip shows it as a card where the user can dry-run it "
+                + "(run in a transaction and roll back) or apply it. Data changes are checked against the schema and "
+                + "the planner's row estimate is returned. For several changes, call once per statement.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "sql": ["type": "string", "description": "Exactly one statement, no BEGIN/COMMIT"],
+                    "summary": ["type": "string", "description": "One short sentence describing the change for the user"],
+                ],
+                "required": ["sql", "summary"],
             ],
         ],
     ]
@@ -205,6 +220,11 @@ final class MCPServer {
         case "open_table":
             guard let table = arguments["table"] as? String else { return ("Missing argument: table", true) }
             return validateOpenTable(connection, table, filters: arguments["filters"] as? [[String: Any]] ?? [])
+        case "propose_change":
+            guard let sql = arguments["sql"] as? String, !sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return ("Missing argument: sql", true)
+            }
+            return proposeChange(connection, sql)
         case "open_query_tab":
             guard let sql = arguments["sql"] as? String, !sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return ("Missing argument: sql", true)
@@ -226,6 +246,50 @@ final class MCPServer {
         guard let statement = outcome.results.last else { return ("OK", false) }
         guard let rows = statement.rows else { return (statement.status, false) }
         return (render(rows), false)
+    }
+
+    /// Validates a proposed change without applying it. Data changes are EXPLAINed inside a read-only
+    /// transaction (planning doesn't execute, so this works for writes); DDL can't be checked this way.
+    private func proposeChange(_ connection: PGConnection, _ sql: String) -> (String, Bool) {
+        let keyword = Self.firstKeyword(sql)
+        if ["BEGIN", "START", "COMMIT", "END", "ROLLBACK", "ABORT", "SAVEPOINT", "RELEASE"].contains(keyword) {
+            return ("Propose only the change itself. Arsip runs it in its own transaction.", true)
+        }
+        if ["SELECT", "SHOW", "EXPLAIN", "VALUES", "TABLE"].contains(keyword) {
+            return ("That's a read query. Use run_query to run it, or open_query_tab to show it.", true)
+        }
+
+        var estimate = "n/a (schema changes can't be estimated)"
+        if ["INSERT", "UPDATE", "DELETE", "MERGE", "WITH"].contains(keyword) {
+            let (plan, isError) = readOnly(connection, "EXPLAIN \(sql)") { plan in
+                (0..<plan.rowCount).compactMap { plan.value(row: $0, column: 0) }.joined(separator: "\n")
+            }
+            if isError { return (plan, true) }
+            estimate = "~\(Self.estimatedRows(fromPlan: plan)) rows"
+        }
+        return ("""
+            Proposed to the user for review. It has NOT been applied.
+            Statement: \(keyword)
+            Planner estimate: \(estimate)
+            The user can dry-run it or apply it in Arsip. Don't repeat the SQL in your reply.
+            """, false)
+    }
+
+    /// First word of the statement, skipping whitespace and `--` comments.
+    static func firstKeyword(_ sql: String) -> String {
+        let lines = sql.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("--") }
+        return String((lines.first ?? "").prefix { $0.isLetter }).uppercased()
+    }
+
+    /// Row estimate of the node under ModifyTable (which itself always reports rows=0).
+    static func estimatedRows(fromPlan plan: String) -> Int {
+        let rows = plan.components(separatedBy: "\n").compactMap { line -> Int? in
+            guard let range = line.range(of: #"rows=(\d+)"#, options: .regularExpression) else { return nil }
+            return Int(line[range].dropFirst(5))
+        }
+        return rows.dropFirst().first ?? rows.first ?? 0
     }
 
     /// Arsip opens the tab when it sees this succeed, so check everything it will need first.
