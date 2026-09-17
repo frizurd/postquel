@@ -21,7 +21,7 @@ struct ArsipApp: App {
             ContentView()
         }
         .defaultSize(width: 1240, height: 780)
-        .windowToolbarStyle(.unified)
+        .windowStyle(.hiddenTitleBar)
     }
 }
 
@@ -39,23 +39,29 @@ struct ContentView: View {
     @State private var session = SessionModel()
 
     var body: some View {
-        if session.isConnected {
-            BrowserView(session: session)
-        } else {
-            ConnectView(session: session)
-                .task { await session.reconnectOnLaunchIfNeeded() }
+        Group {
+            if session.isConnected {
+                BrowserView(session: session)
+            } else {
+                ConnectView(session: session)
+                    .task { await session.reconnectOnLaunchIfNeeded() }
+            }
         }
+        .background(WindowConfigurator())
     }
 }
 
 struct BrowserView: View {
     @Bindable var session: SessionModel
-    @State private var detailWidth: CGFloat = 800
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
     @AppStorage("showsInspector") private var showsInspector = false
     @AppStorage("inspectorMode") private var inspectorMode = InspectorMode.value
+    @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
+
+    private var isSidebarVisible: Bool { columnVisibility != .detailOnly }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: Binding(get: { session.sidebarSelection }, set: { session.sidebarSelected($0) })) {
                 Section {
                     Label("SQL Query", systemImage: "terminal").tag(SidebarItem.query)
@@ -76,34 +82,52 @@ struct BrowserView: View {
             .safeAreaInset(edge: .top, spacing: 0) { connectionHeader }
             .searchable(text: $session.sidebarFilter, placement: .sidebar, prompt: "Filter tables")
             .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+            .toolbar(removing: .sidebarToggle)
         } detail: {
-            tabContents
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
-                .inspector(isPresented: $showsInspector) {
-                    InspectorPanel(session: session, mode: $inspectorMode)
-                }
-                .toolbar(removing: .title)
-                .toolbar {
-                    // Tabs live in the title bar instead of a window title.
-                    ToolbarItem(placement: .navigation) {
-                        // Toolbar items don't stretch on their own; size the strip to the detail column,
-                        // leaving room for the trailing buttons.
-                        TabStrip(session: session)
-                            .frame(width: max(200, detailWidth - 170))
-                    }
-                    if #available(macOS 26, *) {
-                        ToolbarItem(placement: .primaryAction) { titlebarActions }
-                            .sharedBackgroundVisibility(.hidden)
-                    } else {
-                        ToolbarItem(placement: .primaryAction) { titlebarActions }
+            VStack(spacing: 0) {
+                topBar
+                Divider()
+                HStack(spacing: 0) {
+                    tabContents
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if showsInspector {
+                        InspectorResizeHandle(width: $inspectorWidth)
+                        InspectorPanel(session: session, mode: $inspectorMode)
+                            .frame(width: inspectorWidth)
+                            .transition(.move(edge: .trailing))
                     }
                 }
+            }
+            .ignoresSafeArea(.container, edges: .top)
+            .animation(.snappy(duration: 0.25), value: showsInspector)
         }
         .navigationTitle(session.config.database)
     }
 
-    private var titlebarActions: some View {
-        TitlebarActions(session: session, showsInspector: $showsInspector, inspectorMode: $inspectorMode)
+    /// Tabs and buttons in the title bar row. The buttons are anchored to the detail column's
+    /// trailing edge, which is always the window's right edge, so they never move.
+    private var topBar: some View {
+        HStack(spacing: 6) {
+            Button {
+                withAnimation(.snappy(duration: 0.3)) {
+                    columnVisibility = isSidebarVisible ? .detailOnly : .all
+                }
+            } label: {
+                Image(systemName: "sidebar.left")
+            }
+            .buttonStyle(TitlebarIconButtonStyle())
+            .keyboardShortcut("s", modifiers: [.control, .command])
+            .help(isSidebarVisible ? "Hide sidebar (⌃⌘S)" : "Show sidebar (⌃⌘S)")
+
+            TabStrip(session: session)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            TitlebarActions(session: session, showsInspector: $showsInspector, inspectorMode: $inspectorMode)
+        }
+        .padding(.leading, isSidebarVisible ? 8 : TitleBar.trafficLightsInset)
+        .padding(.trailing, 8)
+        .frame(height: TitleBar.height)
+        .background { Color.clear.titleBarBehavior() }
     }
 
     private var connectionHeader: some View {

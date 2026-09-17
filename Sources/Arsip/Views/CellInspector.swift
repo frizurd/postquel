@@ -31,7 +31,8 @@ struct InspectorPanel: View {
                 }
             }
         }
-        .inspectorColumnWidth(min: 280, ideal: 380, max: 800)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder

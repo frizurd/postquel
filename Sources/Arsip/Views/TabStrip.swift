@@ -38,7 +38,7 @@ struct TabStrip: View {
     }
 }
 
-/// Title bar buttons, pinned to the window's trailing edge in their own toolbar item.
+/// Title bar buttons at the trailing end of the top bar.
 struct TitlebarActions: View {
     let session: SessionModel
     @Binding var showsInspector: Bool
