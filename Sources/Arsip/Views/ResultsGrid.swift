@@ -266,9 +266,13 @@ struct ResultsGrid: NSViewRepresentable {
             }
             menu.addItem(item("Copy Rows", #selector(copyRowsMenu)))
             menu.addItem(item("Copy Rows with Headers", #selector(copyRowsWithHeadersMenu)))
-            if parent.editable, table.clickedColumn >= 0 {
+            if parent.editable {
                 menu.addItem(.separator())
-                menu.addItem(item("Set to NULL", #selector(setClickedNull)))
+                if table.clickedColumn >= 0 {
+                    menu.addItem(item("Set to NULL", #selector(setClickedNull)))
+                }
+                let count = table.selectedRowIndexes.count
+                menu.addItem(item(count == 1 ? "Delete Row" : "Delete \(count) Rows", #selector(deleteSelectedRows)))
             }
         }
 
@@ -282,6 +286,8 @@ struct ResultsGrid: NSViewRepresentable {
             guard let table, let result, let column = dataColumn(table.tableColumns[table.clickedColumn]) else { return }
             writeToPasteboard(result.value(row: table.clickedRow, column: column) ?? "NULL")
         }
+
+        @objc private func deleteSelectedRows() { parent.onDeleteRows?() }
 
         @objc private func copyRowsMenu() { copyRows(includeHeaders: false) }
         @objc private func copyRowsWithHeadersMenu() { copyRows(includeHeaders: true) }
