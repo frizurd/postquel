@@ -2,6 +2,7 @@ import SwiftUI
 
 struct QueryEditorView: View {
     @Bindable var model: QueryEditorModel
+    var onShowInspector: () -> Void
 
     var body: some View {
         VSplitView {
@@ -61,7 +62,12 @@ struct QueryEditorView: View {
             }
 
             if let rows = model.currentResult?.rows {
-                ResultsGrid(result: rows)
+                ResultsGrid(
+                    result: rows,
+                    selectedCell: model.selectedCell,
+                    onSelectCell: { model.selectedCell = $0 },
+                    onRequestInspector: onShowInspector
+                )
             } else if let error = model.error, model.results.isEmpty {
                 ScrollView {
                     Text(error)

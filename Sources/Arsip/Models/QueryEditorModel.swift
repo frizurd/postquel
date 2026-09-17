@@ -15,7 +15,10 @@ final class QueryEditorModel {
     private(set) var results: [StatementResult] = []
     private(set) var error: String?
     private(set) var duration: TimeInterval?
-    var selectedResultIndex = 0
+    var selectedResultIndex = 0 {
+        didSet { selectedCell = nil }
+    }
+    var selectedCell: CellSelection?
 
     init(restoreSavedText: Bool = false) {
         text = restoreSavedText
@@ -45,6 +48,7 @@ final class QueryEditorModel {
         isRunning = true
         defer { isRunning = false }
         let outcome = await connection.execute(sql)
+        selectedCell = nil
         results = outcome.results
         error = outcome.error
         duration = outcome.duration

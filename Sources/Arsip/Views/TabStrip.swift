@@ -3,6 +3,7 @@ import SwiftUI
 /// Compact, Safari-style tabs shown in the window's title bar.
 struct TabStrip: View {
     @Bindable var session: SessionModel
+    @Binding var showsInspector: Bool
 
     var body: some View {
         HStack(spacing: 4) {
@@ -39,6 +40,12 @@ struct TabStrip: View {
                 }
                 .keyboardShortcut("r")
                 .help("Reload tables and the current tab (⌘R)")
+
+                Button { showsInspector.toggle() } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .keyboardShortcut("i")
+                .help(showsInspector ? "Hide value inspector (⌘I)" : "Show value inspector (⌘I)")
             }
             .buttonStyle(TitlebarIconButtonStyle())
         }

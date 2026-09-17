@@ -10,6 +10,11 @@ struct ResultsGrid: NSViewRepresentable {
     var editable = false
     /// Data column indices that get a "follow foreign key" button.
     var linkColumns: Set<Int> = []
+    /// The cell shown in the value inspector (row index, data column index).
+    var selectedCell: CellSelection? = nil
+    var onSelectCell: ((CellSelection?) -> Void)? = nil
+    /// Double-click on a value the grid can't edit inline (multi-line, or a read-only grid).
+    var onRequestInspector: (() -> Void)? = nil
     var onFollowLink: ((_ row: Int, _ column: Int) -> Void)? = nil
     var onSort: ((GridSort?) -> Void)? = nil
     var onEdit: ((_ row: Int, _ column: Int, _ value: String?) -> Void)? = nil
@@ -31,6 +36,7 @@ struct ResultsGrid: NSViewRepresentable {
         table.dataSource = coordinator
         table.delegate = coordinator
         table.target = coordinator
+        table.action = #selector(Coordinator.clicked(_:))
         table.doubleAction = #selector(Coordinator.doubleClicked(_:))
         table.copyHandler = { [weak coordinator] in coordinator?.copyRows(includeHeaders: false) }
         let menu = NSMenu()
@@ -50,7 +56,7 @@ struct ResultsGrid: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.apply(result: result, sort: sort, linkColumns: linkColumns)
+        context.coordinator.apply(result: result, sort: sort, linkColumns: linkColumns, selectedCell: selectedCell)
     }
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
@@ -58,14 +64,23 @@ struct ResultsGrid: NSViewRepresentable {
         weak var table: GridTableView?
         private var result: PGResult?
         private var linkColumns: Set<Int> = []
+        private var selectedCell: CellSelection?
+        private var lastClickedColumn: Int?
         private var syncingSort = false
         private var editingCell: (row: Int, column: Int)?
         private var editCancelled = false
 
         init(parent: ResultsGrid) { self.parent = parent }
 
-        func apply(result: PGResult?, sort: GridSort?, linkColumns: Set<Int>) {
+        func apply(result: PGResult?, sort: GridSort?, linkColumns: Set<Int>, selectedCell: CellSelection?) {
             guard let table else { return }
+            if selectedCell != self.selectedCell {
+                let previous = self.selectedCell
+                self.selectedCell = selectedCell
+                if selectedCell == nil, table.selectedRow >= 0 { table.deselectAll(nil) }
+                let rows = IndexSet([previous?.row, selectedCell?.row].compactMap { $0 }.filter { $0 < table.numberOfRows })
+                table.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+            }
             if result !== self.result || linkColumns != self.linkColumns {
                 let sameShape = result?.columns == self.result?.columns && !table.tableColumns.isEmpty
                 self.result = result
@@ -127,7 +142,8 @@ struct ResultsGrid: NSViewRepresentable {
             let cell = tableView.makeView(withIdentifier: GridCell.reuseIdentifier, owner: nil) as? GridCell ?? GridCell()
             let value = result.value(row: row, column: column)
             cell.show(value, alignRight: result.columns[column].isNumeric,
-                      showsLink: value != nil && linkColumns.contains(column))
+                      showsLink: value != nil && linkColumns.contains(column),
+                      isInspected: selectedCell == CellSelection(row: row, column: column))
             cell.field.delegate = self
             cell.linkButton.target = self
             cell.linkButton.action = #selector(followLink(_:))
@@ -149,19 +165,39 @@ struct ResultsGrid: NSViewRepresentable {
             parent.onFollowLink?(row, column)
         }
 
+        // MARK: Selection
+
+        @objc func clicked(_ sender: NSTableView) {
+            let row = sender.clickedRow, columnIndex = sender.clickedColumn
+            guard row >= 0, columnIndex >= 0, let column = dataColumn(sender.tableColumns[columnIndex]) else { return }
+            lastClickedColumn = column
+            parent.onSelectCell?(CellSelection(row: row, column: column))
+        }
+
+        /// Keyboard row changes keep the last clicked column.
+        func tableViewSelectionDidChange(_ notification: Notification) {
+            guard let table else { return }
+            let row = table.selectedRow
+            guard row >= 0, let result, !result.columns.isEmpty else {
+                parent.onSelectCell?(nil)
+                return
+            }
+            parent.onSelectCell?(CellSelection(row: row, column: min(lastClickedColumn ?? 0, result.columns.count - 1)))
+        }
+
         // MARK: Editing
 
         @objc func doubleClicked(_ sender: NSTableView) {
             let row = sender.clickedRow, columnIndex = sender.clickedColumn
-            guard parent.editable, row >= 0, columnIndex >= 0, let result,
+            guard row >= 0, columnIndex >= 0, let result,
                   let column = dataColumn(sender.tableColumns[columnIndex]),
                   let cell = sender.view(atColumn: columnIndex, row: row, makeIfNecessary: false) as? GridCell
             else { return }
 
             let value = result.value(row: row, column: column)
-            // Single-line field editor would mangle multi-line values; a proper value editor comes later.
-            if value?.contains("\n") == true {
-                NSSound.beep()
+            // The single-line field editor would mangle multi-line values; those go to the inspector.
+            guard parent.editable, value?.contains("\n") != true else {
+                parent.onRequestInspector?()
                 return
             }
             editingCell = (row, column)
@@ -273,6 +309,9 @@ final class GridCell: NSTableCellView {
     init() {
         super.init(frame: .zero)
         identifier = Self.reuseIdentifier
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        layer?.borderColor = NSColor.controlAccentColor.cgColor
         field.font = Self.font
         field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = true
@@ -305,8 +344,9 @@ final class GridCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ value: String?, alignRight: Bool, showsLink: Bool) {
+    func show(_ value: String?, alignRight: Bool, showsLink: Bool, isInspected: Bool) {
         field.isEditable = false
+        layer?.borderWidth = isInspected ? 1.5 : 0
         linkButton.isHidden = !showsLink
         fieldToEdge.isActive = !showsLink
         fieldToButton.isActive = showsLink

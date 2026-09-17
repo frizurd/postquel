@@ -3,6 +3,7 @@ import SwiftUI
 struct TableBrowserView: View {
     @Bindable var model: TableBrowserModel
     var onOpenRelation: (RelationRef, [ColumnFilter]) -> Void
+    var onShowInspector: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,6 +17,9 @@ struct TableBrowserView: View {
                 sortable: true,
                 editable: model.canEdit,
                 linkColumns: model.linkColumns,
+                selectedCell: model.selectedCell,
+                onSelectCell: { model.selectedCell = $0 },
+                onRequestInspector: onShowInspector,
                 onFollowLink: { row, column in
                     if let target = model.linkTarget(row: row, column: column) {
                         onOpenRelation(target.relation, target.filters)

@@ -40,6 +40,7 @@ struct ContentView: View {
 struct BrowserView: View {
     @Bindable var session: SessionModel
     @State private var detailWidth: CGFloat = 800
+    @AppStorage("showsInspector") private var showsInspector = false
 
     var body: some View {
         NavigationSplitView {
@@ -66,13 +67,16 @@ struct BrowserView: View {
         } detail: {
             tabContents
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
+                .inspector(isPresented: $showsInspector) {
+                    InspectorPanel(session: session)
+                }
                 .toolbar(removing: .title)
                 .toolbar {
                     // Tabs live in the title bar instead of a window title.
                     ToolbarItem(placement: .navigation) {
                         // Toolbar items don't stretch on their own; size the strip to the detail column
                         // (minus the toolbar's own edge insets) so the buttons sit at the trailing edge.
-                        TabStrip(session: session)
+                        TabStrip(session: session, showsInspector: $showsInspector)
                             .frame(width: max(300, detailWidth - 22))
                     }
                 }
@@ -120,11 +124,13 @@ struct BrowserView: View {
     private func tabView(_ tab: WorkspaceTab) -> some View {
         switch tab.content {
         case .query(let editor):
-            QueryEditorView(model: editor)
+            QueryEditorView(model: editor, onShowInspector: { showsInspector = true })
         case .table(let browser):
-            TableBrowserView(model: browser) { relation, filters in
-                session.openTab(relation, filters: filters)
-            }
+            TableBrowserView(
+                model: browser,
+                onOpenRelation: { relation, filters in session.openTab(relation, filters: filters) },
+                onShowInspector: { showsInspector = true }
+            )
         }
     }
 }

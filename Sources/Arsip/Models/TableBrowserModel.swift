@@ -12,6 +12,11 @@ struct ColumnFilter: Hashable, Codable {
     let value: String
 }
 
+struct CellSelection: Hashable {
+    let row: Int
+    let column: Int
+}
+
 struct ForeignKey {
     let columns: [String]
     let target: RelationRef
@@ -35,6 +40,7 @@ final class TableBrowserModel {
     private(set) var lastDuration: TimeInterval = 0
     private(set) var filters: [ColumnFilter]
     var error: String?
+    var selectedCell: CellSelection?
     var sort: GridSort?
     var page = 0
 
@@ -131,18 +137,21 @@ final class TableBrowserModel {
     func clearFilters() async {
         filters = []
         page = 0
+        selectedCell = nil
         onStateChange?()
         await load()
     }
 
     func goToPage(_ newPage: Int) async {
         page = max(0, newPage)
+        selectedCell = nil
         await load()
     }
 
     func applySort(_ newSort: GridSort?) async {
         sort = newSort
         page = 0
+        selectedCell = nil
         onStateChange?()
         await load()
     }

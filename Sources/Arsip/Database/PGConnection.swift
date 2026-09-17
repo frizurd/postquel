@@ -13,6 +13,8 @@ struct PGColumn: Hashable {
 
     var typeName: String { PGTypes.name(for: typeOID) }
     var isNumeric: Bool { PGTypes.numeric.contains(typeOID) }
+    var isJSON: Bool { typeOID == 114 || typeOID == 3802 }
+    var isBool: Bool { typeOID == 16 }
 }
 
 /// Owns a libpq result. Results are read-only once created, so cells can be
