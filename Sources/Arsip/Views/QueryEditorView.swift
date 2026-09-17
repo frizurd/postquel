@@ -43,17 +43,24 @@ struct QueryEditorView: View {
 
     private var editorBar: some View {
         HStack(spacing: 8) {
-            if model.isRunning {
-                Button(role: .destructive) { model.cancel() } label: {
-                    Label("Cancel", systemImage: "stop.fill")
+            // One button that swaps label, at a fixed width: the row mustn't shift when a query starts.
+            Button {
+                if model.isRunning {
+                    model.cancel()
+                } else {
+                    Task { await model.runCurrent() }
                 }
-                ProgressView().controlSize(.small)
-            } else {
-                Button { Task { await model.runCurrent() } } label: {
-                    Label("Run", systemImage: "play.fill")
-                }
-                .help("Run selection, or the whole editor (⌘↩)")
+            } label: {
+                Label(model.isRunning ? "Cancel" : "Run", systemImage: model.isRunning ? "stop.fill" : "play.fill")
+                    .frame(width: 62)
             }
+            .help(model.isRunning ? "Cancel the running query" : "Run the statement at the cursor (⌘↩)")
+
+            ProgressView()
+                .controlSize(.small)
+                .opacity(model.isRunning ? 1 : 0)
+                .frame(width: 14)
+
             if generator != nil {
                 Button { showsPrompt.toggle() } label: {
                     Label("Ask AI", systemImage: "sparkles")

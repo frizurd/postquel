@@ -51,9 +51,10 @@ struct TableBrowserView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            if model.isLoading {
-                ProgressView().controlSize(.small)
-            }
+            ProgressView()
+                .controlSize(.small)
+                .opacity(model.isLoading ? 1 : 0)
+                .frame(width: 14)
             if let error = model.error {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
                 Text(error).foregroundStyle(.red).lineLimit(1).help(error)
