@@ -1,17 +1,41 @@
 import AppKit
 import SwiftUI
 
-/// Right-hand inspector showing the selected cell of the active tab.
+enum InspectorMode: String {
+    case value, assistant
+}
+
+/// Right-hand inspector: the selected cell's value, or the Claude assistant.
 struct InspectorPanel: View {
     let session: SessionModel
+    @Binding var mode: InspectorMode
 
     var body: some View {
-        content
-            .inspectorColumnWidth(min: 260, ideal: 340, max: 700)
+        VStack(spacing: 0) {
+            Picker("Inspector", selection: $mode) {
+                Text("Value").tag(InspectorMode.value)
+                Text("Assistant").tag(InspectorMode.assistant)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
+
+            switch mode {
+            case .value:
+                valueContent
+            case .assistant:
+                if let assistant = session.assistant {
+                    AssistantPanel(model: assistant, onOpenSQL: { session.openQueryTab(text: $0) })
+                }
+            }
+        }
+        .inspectorColumnWidth(min: 280, ideal: 380, max: 800)
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var valueContent: some View {
         switch session.activeTab?.content {
         case .table(let browser):
             if let result = browser.result, let cell = browser.selectedCell, contains(result, cell) {

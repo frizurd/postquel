@@ -77,35 +77,36 @@ final class PGConnection: @unchecked Sendable {
     static func connect(_ config: ConnectionConfig) async throws -> PGConnection {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                var params: [(String, String)] = [
-                    ("host", config.host),
-                    ("port", String(config.port)),
-                    ("user", config.user),
-                    ("dbname", config.database),
-                    ("application_name", "Arsip"),
-                    ("client_encoding", "UTF8"),
-                    ("connect_timeout", "10"),
-                ]
-                if !config.password.isEmpty { params.append(("password", config.password)) }
-
-                let conn = withCStringArray(params.map { Optional($0.0) } + [nil]) { keys in
-                    withCStringArray(params.map { Optional($0.1) } + [nil]) { values in
-                        PQconnectdbParams(keys, values, 0)
-                    }
-                }
-                guard let conn else {
-                    continuation.resume(throwing: PGError("Could not allocate connection"))
-                    return
-                }
-                guard PQstatus(conn) == CONNECTION_OK else {
-                    let message = errorMessage(conn)
-                    PQfinish(conn)
-                    continuation.resume(throwing: PGError(message))
-                    return
-                }
-                continuation.resume(returning: PGConnection(conn: conn))
+                continuation.resume(with: Result { try open(config) })
             }
         }
+    }
+
+    /// Blocking connect, for callers that aren't on the main thread (e.g. the MCP server).
+    static func open(_ config: ConnectionConfig, applicationName: String = "Arsip") throws -> PGConnection {
+        var params: [(String, String)] = [
+            ("host", config.host),
+            ("port", String(config.port)),
+            ("user", config.user),
+            ("dbname", config.database),
+            ("application_name", applicationName),
+            ("client_encoding", "UTF8"),
+            ("connect_timeout", "10"),
+        ]
+        if !config.password.isEmpty { params.append(("password", config.password)) }
+
+        let conn = withCStringArray(params.map { Optional($0.0) } + [nil]) { keys in
+            withCStringArray(params.map { Optional($0.1) } + [nil]) { values in
+                PQconnectdbParams(keys, values, 0)
+            }
+        }
+        guard let conn else { throw PGError("Could not allocate connection") }
+        guard PQstatus(conn) == CONNECTION_OK else {
+            let message = errorMessage(conn)
+            PQfinish(conn)
+            throw PGError(message)
+        }
+        return PGConnection(conn: conn)
     }
 
     /// Runs `sql`. Without params it may contain multiple statements; with params
@@ -113,9 +114,19 @@ final class PGConnection: @unchecked Sendable {
     func execute(_ sql: String, params: [String?] = []) async -> ExecutionOutcome {
         await withCheckedContinuation { continuation in
             queue.async {
-                continuation.resume(returning: self.executeSync(sql, params: params))
+                continuation.resume(returning: self.executeSync(sql, params: params, singleStatement: false))
             }
         }
+    }
+
+    /// Blocking variant. `singleStatement` uses the extended protocol even without params, which makes
+    /// the server reject multiple statements (so `COMMIT; DELETE ...` can't escape a transaction).
+    func executeBlocking(_ sql: String, params: [String?] = [], singleStatement: Bool = false) -> ExecutionOutcome {
+        queue.sync { executeSync(sql, params: params, singleStatement: singleStatement) }
+    }
+
+    func silenceNotices() {
+        queue.sync { _ = PQsetNoticeProcessor(conn, { _, _ in }, nil) }
     }
 
     func cancel() {
@@ -124,7 +135,7 @@ final class PGConnection: @unchecked Sendable {
         _ = PQcancel(cancelHandle, &buffer, 256)
     }
 
-    private func executeSync(_ sql: String, params: [String?]) -> ExecutionOutcome {
+    private func executeSync(_ sql: String, params: [String?], singleStatement: Bool) -> ExecutionOutcome {
         let started = Date()
         var outcome = ExecutionOutcome()
         defer { outcome.duration = Date().timeIntervalSince(started) }
@@ -137,11 +148,16 @@ final class PGConnection: @unchecked Sendable {
             }
         }
 
-        let sent: Int32 = params.isEmpty
-            ? PQsendQuery(conn, sql)
-            : withCStringArray(params) { values in
+        let sent: Int32
+        if !params.isEmpty {
+            sent = withCStringArray(params) { values in
                 PQsendQueryParams(conn, sql, Int32(params.count), nil, values, nil, nil, 0)
             }
+        } else if singleStatement {
+            sent = PQsendQueryParams(conn, sql, 0, nil, nil, nil, nil, 0)
+        } else {
+            sent = PQsendQuery(conn, sql)
+        }
         guard sent == 1 else {
             outcome.error = Self.errorMessage(conn)
             return outcome

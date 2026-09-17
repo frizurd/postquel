@@ -2,6 +2,17 @@ import AppKit
 import SwiftUI
 
 @main
+enum Entry {
+    static func main() {
+        // Claude Code launches this same binary as a stdio MCP server.
+        if CommandLine.arguments.dropFirst().first == MCPServer.launchArgument {
+            MCPServer.runFromEnvironment()
+        } else {
+            ArsipApp.main()
+        }
+    }
+}
+
 struct ArsipApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -41,6 +52,7 @@ struct BrowserView: View {
     @Bindable var session: SessionModel
     @State private var detailWidth: CGFloat = 800
     @AppStorage("showsInspector") private var showsInspector = false
+    @AppStorage("inspectorMode") private var inspectorMode = InspectorMode.value
 
     var body: some View {
         NavigationSplitView {
@@ -68,7 +80,7 @@ struct BrowserView: View {
             tabContents
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
                 .inspector(isPresented: $showsInspector) {
-                    InspectorPanel(session: session)
+                    InspectorPanel(session: session, mode: $inspectorMode)
                 }
                 .toolbar(removing: .title)
                 .toolbar {
@@ -76,7 +88,7 @@ struct BrowserView: View {
                     ToolbarItem(placement: .navigation) {
                         // Toolbar items don't stretch on their own; size the strip to the detail column
                         // (minus the toolbar's own edge insets) so the buttons sit at the trailing edge.
-                        TabStrip(session: session, showsInspector: $showsInspector)
+                        TabStrip(session: session, showsInspector: $showsInspector, inspectorMode: $inspectorMode)
                             .frame(width: max(300, detailWidth - 22))
                     }
                 }
@@ -120,16 +132,21 @@ struct BrowserView: View {
         }
     }
 
+    private func showValueInspector() {
+        inspectorMode = .value
+        showsInspector = true
+    }
+
     @ViewBuilder
     private func tabView(_ tab: WorkspaceTab) -> some View {
         switch tab.content {
         case .query(let editor):
-            QueryEditorView(model: editor, onShowInspector: { showsInspector = true })
+            QueryEditorView(model: editor, onShowInspector: showValueInspector)
         case .table(let browser):
             TableBrowserView(
                 model: browser,
                 onOpenRelation: { relation, filters in session.openTab(relation, filters: filters) },
-                onShowInspector: { showsInspector = true }
+                onShowInspector: showValueInspector
             )
         }
     }

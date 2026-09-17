@@ -143,6 +143,7 @@ final class SessionModel {
     var sidebarFilter = ""
     private(set) var tabs: [WorkspaceTab] = []
     private(set) var activeTabID: UUID?
+    private(set) var assistant: AssistantModel?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
     var isConnected: Bool { connection != nil }
@@ -184,6 +185,9 @@ final class SessionModel {
             UserDefaults.standard.set(true, forKey: Self.reconnectKey)
 
             self.connection = connection
+            let assistant = AssistantModel(config: attempt, serverVersion: connection.serverVersion)
+            assistant.contextProvider = { [weak self] in self?.assistantContext }
+            self.assistant = assistant
             restoreWorkspace()
             await refreshCatalog()
         } catch {
@@ -194,10 +198,28 @@ final class SessionModel {
     func disconnect() {
         saveWorkspace()
         UserDefaults.standard.set(false, forKey: Self.reconnectKey)
+        assistant?.stop()
+        assistant = nil
         tabs = []
         activeTabID = nil
         connection = nil
         schemas = []
+    }
+
+    /// What the assistant is told the user is looking at.
+    private var assistantContext: String? {
+        switch activeTab?.content {
+        case .table(let browser):
+            var context = "The user has the \(browser.relation.kind.rawValue) \(browser.relation.schema).\(browser.relation.name) open"
+            if !browser.filters.isEmpty { context += ", filtered by \(browser.filterDescription)" }
+            return context + "."
+        case .query(let editor):
+            let sql = editor.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sql.isEmpty else { return "The user has an empty SQL query tab open." }
+            return "The user has a SQL query tab open with:\n```sql\n\(String(sql.prefix(4000)))\n```"
+        case nil:
+            return nil
+        }
     }
 
     /// ⌘R: reload the table list and the active table tab.
@@ -251,6 +273,10 @@ final class SessionModel {
 
     func openQueryTab(restoreSavedText: Bool = false) {
         insertTab(makeQueryTab(text: nil, restoreSavedText: restoreSavedText))
+    }
+
+    func openQueryTab(text: String) {
+        insertTab(makeQueryTab(text: text))
     }
 
     private func makeTableTab(_ relation: RelationRef, filters: [ColumnFilter] = [], sort: GridSort? = nil) -> WorkspaceTab? {

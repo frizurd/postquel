@@ -4,6 +4,7 @@ import SwiftUI
 struct TabStrip: View {
     @Bindable var session: SessionModel
     @Binding var showsInspector: Bool
+    @Binding var inspectorMode: InspectorMode
 
     var body: some View {
         HStack(spacing: 4) {
@@ -41,11 +42,19 @@ struct TabStrip: View {
                 .keyboardShortcut("r")
                 .help("Reload tables and the current tab (⌘R)")
 
-                Button { showsInspector.toggle() } label: {
+                Button { toggleInspector(.assistant) } label: {
+                    Image(systemName: "sparkles")
+                }
+                .buttonStyle(TitlebarIconButtonStyle(isOn: showsInspector && inspectorMode == .assistant))
+                .keyboardShortcut("k")
+                .help("Ask Claude about this database (⌘K)")
+
+                Button { toggleInspector(.value) } label: {
                     Image(systemName: "sidebar.right")
                 }
+                .buttonStyle(TitlebarIconButtonStyle(isOn: showsInspector && inspectorMode == .value))
                 .keyboardShortcut("i")
-                .help(showsInspector ? "Hide value inspector (⌘I)" : "Show value inspector (⌘I)")
+                .help("Value inspector (⌘I)")
             }
             .buttonStyle(TitlebarIconButtonStyle())
         }
@@ -60,23 +69,37 @@ struct TabStrip: View {
             .allowsHitTesting(false)
         }
     }
+
+    /// Shows the inspector in `mode`, or hides it if it's already showing that.
+    private func toggleInspector(_ mode: InspectorMode) {
+        if showsInspector, inspectorMode == mode {
+            showsInspector = false
+        } else {
+            inspectorMode = mode
+            showsInspector = true
+        }
+    }
 }
 
 /// Square icon button: faint background on hover, stronger while pressed.
 struct TitlebarIconButtonStyle: ButtonStyle {
+    /// Tints the icon, for buttons that toggle a panel.
+    var isOn = false
+
     func makeBody(configuration: Configuration) -> some View {
-        StyledBody(configuration: configuration)
+        StyledBody(configuration: configuration, isOn: isOn)
     }
 
     private struct StyledBody: View {
         let configuration: Configuration
+        let isOn: Bool
         @State private var isHovered = false
         @Environment(\.isEnabled) private var isEnabled
 
         var body: some View {
             configuration.label
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isEnabled ? .secondary : .tertiary)
+                .foregroundStyle(isOn ? AnyShapeStyle(.tint) : isEnabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
                 .frame(width: 28, height: 28)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
