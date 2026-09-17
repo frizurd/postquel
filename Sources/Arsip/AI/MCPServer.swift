@@ -70,7 +70,7 @@ final class MCPServer {
                 "protocolVersion": params["protocolVersion"] as? String ?? "2025-06-18",
                 "capabilities": ["tools": [String: Any]()],
                 "serverInfo": ["name": "arsip", "version": "0.1.0"],
-                "instructions": "Read-only tools for the PostgreSQL database \(databaseLabel).",
+                "instructions": "Read-only tools for the PostgreSQL database \(databaseLabel), plus tools that open tables and queries in the Arsip window.",
             ])
         case "ping":
             respond(id, result: [String: Any]())
@@ -147,6 +147,41 @@ final class MCPServer {
             ],
             "annotations": ["readOnlyHint": true],
         ],
+        [
+            "name": "open_table",
+            "description": "Open a table or view in a new tab in the user's Arsip window, optionally filtered to rows "
+                + "where columns equal given values (e.g. one customer's orders). Use this to show data instead of "
+                + "pasting long results.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "table": ["type": "string", "description": "Table name, optionally schema-qualified"],
+                    "filters": [
+                        "type": "array",
+                        "description": "Equality filters, combined with AND",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "column": ["type": "string"],
+                                "value": ["type": "string", "description": "Value as text, e.g. \"42\" or \"refunded\""],
+                            ],
+                            "required": ["column", "value"],
+                        ],
+                    ],
+                ],
+                "required": ["table"],
+            ],
+        ],
+        [
+            "name": "open_query_tab",
+            "description": "Open SQL in a new query tab in the user's Arsip window for them to review and run. "
+                + "It is not executed. Use for longer queries and for any data or schema changes you propose.",
+            "inputSchema": [
+                "type": "object",
+                "properties": ["sql": ["type": "string", "description": "The SQL to put in the tab"]],
+                "required": ["sql"],
+            ],
+        ],
     ]
 
     private func callTool(_ name: String, _ arguments: [String: Any]) -> (String, Bool) {
@@ -167,6 +202,14 @@ final class MCPServer {
             return readOnly(connection, "EXPLAIN (\(options)) \(sql)") { plan in
                 (0..<plan.rowCount).compactMap { plan.value(row: $0, column: 0) }.joined(separator: "\n")
             }
+        case "open_table":
+            guard let table = arguments["table"] as? String else { return ("Missing argument: table", true) }
+            return validateOpenTable(connection, table, filters: arguments["filters"] as? [[String: Any]] ?? [])
+        case "open_query_tab":
+            guard let sql = arguments["sql"] as? String, !sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return ("Missing argument: sql", true)
+            }
+            return ("Opened a new query tab in Arsip with the SQL. It has not been run; the user decides whether to run it.", false)
         default:
             return ("Unknown tool: \(name)", true)
         }
@@ -183,6 +226,37 @@ final class MCPServer {
         guard let statement = outcome.results.last else { return ("OK", false) }
         guard let rows = statement.rows else { return (statement.status, false) }
         return (render(rows), false)
+    }
+
+    /// Arsip opens the tab when it sees this succeed, so check everything it will need first.
+    private func validateOpenTable(_ connection: PGConnection, _ table: String, filters: [[String: Any]]) -> (String, Bool) {
+        let lookup = connection.executeBlocking("""
+            SELECT n.nspname, c.relname
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.oid = to_regclass($1)
+            """, params: [table])
+        if let error = lookup.error { return (error, true) }
+        guard let rows = lookup.results.first?.rows, rows.rowCount == 1,
+              let schema = rows.value(row: 0, column: 0), let name = rows.value(row: 0, column: 1)
+        else { return ("Table not found: \(table). Use list_tables to see what exists.", true) }
+
+        let columnLookup = connection.executeBlocking("""
+            SELECT attname FROM pg_attribute
+            WHERE attrelid = to_regclass($1) AND attnum > 0 AND NOT attisdropped
+            """, params: [table])
+        let columnRows = columnLookup.results.first?.rows
+        let columns = Set((0..<(columnRows?.rowCount ?? 0)).compactMap { columnRows?.value(row: $0, column: 0) })
+
+        var descriptions: [String] = []
+        for filter in filters {
+            guard let column = filter["column"] as? String, filter["value"] != nil else {
+                return ("Each filter needs a column and a value", true)
+            }
+            guard columns.contains(column) else { return ("Column \(column) doesn't exist in \(schema).\(name)", true) }
+            descriptions.append("\(column) = \(filter["value"]!)")
+        }
+        let filterText = descriptions.isEmpty ? "" : " filtered by " + descriptions.joined(separator: " AND ")
+        return ("Opened \(schema).\(name)\(filterText) in a new tab in Arsip.", false)
     }
 
     private func listTables(_ connection: PGConnection, schema: String?) -> (String, Bool) {

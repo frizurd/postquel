@@ -237,7 +237,7 @@ private struct ToolCallView: View {
                     Text(call.title)
                         .font(.callout.weight(.medium))
                         .lineLimit(1)
-                    if call.name == "run_query" || call.name == "explain_query" {
+                    if call.showsSQL {
                         Text(call.detail.replacingOccurrences(of: "\n", with: " "))
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
@@ -260,7 +260,7 @@ private struct ToolCallView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                if call.name == "run_query" || call.name == "explain_query" {
+                if call.showsSQL {
                     Text(call.detail)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)

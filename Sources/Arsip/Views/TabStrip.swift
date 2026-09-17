@@ -3,60 +3,27 @@ import SwiftUI
 /// Compact, Safari-style tabs shown in the window's title bar.
 struct TabStrip: View {
     @Bindable var session: SessionModel
-    @Binding var showsInspector: Bool
-    @Binding var inspectorMode: InspectorMode
 
     var body: some View {
-        HStack(spacing: 4) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        ForEach(session.tabs) { tab in
-                            TabButton(
-                                title: tab.title,
-                                symbol: tab.symbol,
-                                isActive: tab.id == session.activeTabID,
-                                select: { session.activate(tab.id) },
-                                close: { session.closeTab(tab.id) }
-                            )
-                            .id(tab.id)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(session.tabs) { tab in
+                        TabButton(
+                            title: tab.title,
+                            symbol: tab.symbol,
+                            isActive: tab.id == session.activeTabID,
+                            select: { session.activate(tab.id) },
+                            close: { session.closeTab(tab.id) }
+                        )
+                        .id(tab.id)
                     }
                 }
-                .onChange(of: session.activeTabID) { _, id in
-                    guard let id else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
-                }
             }
-
-            HStack(spacing: 2) {
-                Button { session.openQueryTab() } label: {
-                    Image(systemName: "plus")
-                }
-                .keyboardShortcut("t")
-                .help("New SQL query tab (⌘T)")
-
-                Button { Task { await session.refresh() } } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .keyboardShortcut("r")
-                .help("Reload tables and the current tab (⌘R)")
-
-                Button { toggleInspector(.assistant) } label: {
-                    Image(systemName: "sparkles")
-                }
-                .buttonStyle(TitlebarIconButtonStyle(isOn: showsInspector && inspectorMode == .assistant))
-                .keyboardShortcut("k")
-                .help("Ask Claude about this database (⌘K)")
-
-                Button { toggleInspector(.value) } label: {
-                    Image(systemName: "sidebar.right")
-                }
-                .buttonStyle(TitlebarIconButtonStyle(isOn: showsInspector && inspectorMode == .value))
-                .keyboardShortcut("i")
-                .help("Value inspector (⌘I)")
+            .onChange(of: session.activeTabID) { _, id in
+                guard let id else { return }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
             }
-            .buttonStyle(TitlebarIconButtonStyle())
         }
         .background {
             // ⌘W closes the active tab instead of the window while tabs are open.
@@ -68,6 +35,44 @@ struct TabStrip: View {
             .opacity(0)
             .allowsHitTesting(false)
         }
+    }
+}
+
+/// Title bar buttons, pinned to the window's trailing edge in their own toolbar item.
+struct TitlebarActions: View {
+    let session: SessionModel
+    @Binding var showsInspector: Bool
+    @Binding var inspectorMode: InspectorMode
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Button { session.openQueryTab() } label: {
+                Image(systemName: "plus")
+            }
+            .keyboardShortcut("t")
+            .help("New SQL query tab (⌘T)")
+
+            Button { Task { await session.refresh() } } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .keyboardShortcut("r")
+            .help("Reload tables and the current tab (⌘R)")
+
+            Button { toggleInspector(.assistant) } label: {
+                Image(systemName: "sparkles")
+            }
+            .buttonStyle(TitlebarIconButtonStyle(isOn: showsInspector && inspectorMode == .assistant))
+            .keyboardShortcut("k")
+            .help("Ask Claude about this database (⌘K)")
+
+            Button { toggleInspector(.value) } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .buttonStyle(TitlebarIconButtonStyle(isOn: showsInspector && inspectorMode == .value))
+            .keyboardShortcut("i")
+            .help("Value inspector (⌘I)")
+        }
+        .buttonStyle(TitlebarIconButtonStyle())
     }
 
     /// Shows the inspector in `mode`, or hides it if it's already showing that.

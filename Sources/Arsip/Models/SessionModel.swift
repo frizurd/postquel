@@ -187,6 +187,9 @@ final class SessionModel {
             self.connection = connection
             let assistant = AssistantModel(config: attempt, serverVersion: connection.serverVersion)
             assistant.contextProvider = { [weak self] in self?.assistantContext }
+            assistant.onAction = { [weak self] action in
+                Task { await self?.perform(action) }
+            }
             self.assistant = assistant
             restoreWorkspace()
             await refreshCatalog()
@@ -204,6 +207,28 @@ final class SessionModel {
         activeTabID = nil
         connection = nil
         schemas = []
+    }
+
+    private func perform(_ action: AssistantAction) async {
+        switch action {
+        case .openQuery(let sql):
+            openQueryTab(text: sql)
+        case .openTable(let name, let filters):
+            if relation(named: name) == nil { await refreshCatalog() }  // may have been created since
+            if let relation = relation(named: name) { openTab(relation, filters: filters) }
+        }
+    }
+
+    /// Resolves "orders", "public.orders" or "\"Public\".\"Orders\"" like search_path would, preferring public.
+    private func relation(named name: String) -> RelationRef? {
+        let parts = name.split(separator: ".", maxSplits: 1).map {
+            $0.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        }
+        let all = schemas.flatMap(\.relations)
+        if parts.count == 2 {
+            return all.first { $0.schema == parts[0] && $0.name == parts[1] }
+        }
+        return all.first { $0.schema == "public" && $0.name == parts[0] } ?? all.first { $0.name == parts[0] }
     }
 
     /// What the assistant is told the user is looking at.

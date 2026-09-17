@@ -86,14 +86,24 @@ struct BrowserView: View {
                 .toolbar {
                     // Tabs live in the title bar instead of a window title.
                     ToolbarItem(placement: .navigation) {
-                        // Toolbar items don't stretch on their own; size the strip to the detail column
-                        // (minus the toolbar's own edge insets) so the buttons sit at the trailing edge.
-                        TabStrip(session: session, showsInspector: $showsInspector, inspectorMode: $inspectorMode)
-                            .frame(width: max(300, detailWidth - 22))
+                        // Toolbar items don't stretch on their own; size the strip to the detail column,
+                        // leaving room for the trailing buttons.
+                        TabStrip(session: session)
+                            .frame(width: max(200, detailWidth - 170))
+                    }
+                    if #available(macOS 26, *) {
+                        ToolbarItem(placement: .primaryAction) { titlebarActions }
+                            .sharedBackgroundVisibility(.hidden)
+                    } else {
+                        ToolbarItem(placement: .primaryAction) { titlebarActions }
                     }
                 }
         }
         .navigationTitle(session.config.database)
+    }
+
+    private var titlebarActions: some View {
+        TitlebarActions(session: session, showsInspector: $showsInspector, inspectorMode: $inspectorMode)
     }
 
     private var connectionHeader: some View {

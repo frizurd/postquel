@@ -1,6 +1,11 @@
 import Foundation
 import Observation
 
+enum AssistantAction {
+    case openTable(name: String, filters: [ColumnFilter])
+    case openQuery(sql: String)
+}
+
 /// Chat with Claude Code about the connected database. Each turn runs `claude -p` with
 /// Arsip's read-only MCP server; follow-up turns resume the same Claude session.
 @MainActor @Observable
@@ -19,6 +24,8 @@ final class AssistantModel {
             case "describe_table": "Described \(detail)"
             case "run_query": "Ran query"
             case "explain_query": "Explained query"
+            case "open_table": "Opened \(detail)"
+            case "open_query_tab": "Opened query tab"
             default: name
             }
         }
@@ -29,8 +36,13 @@ final class AssistantModel {
             case "describe_table": "tablecells"
             case "run_query": "play"
             case "explain_query": "gauge.with.dots.needle.33percent"
+            case "open_table", "open_query_tab": "arrow.up.right.square"
             default: "wrench"
             }
+        }
+
+        var showsSQL: Bool {
+            ["run_query", "explain_query", "open_query_tab"].contains(name)
         }
     }
 
@@ -63,6 +75,9 @@ final class AssistantModel {
     let databaseName: String
     /// Describes what the user is looking at (open table, query text); sent with each prompt.
     @ObservationIgnored var contextProvider: (() -> String?)?
+    /// Performs `open_table` / `open_query_tab` in the window once the tool call succeeded.
+    @ObservationIgnored var onAction: ((AssistantAction) -> Void)?
+    @ObservationIgnored private var toolInputs: [String: [String: Any]] = [:]
 
     @ObservationIgnored private let config: ConnectionConfig
     @ObservationIgnored private let serverVersion: String
@@ -209,8 +224,11 @@ final class AssistantModel {
         and data before answering. Don't guess column names.
         - Your access is read-only. If the user wants to change data or schema, write the SQL for them to review \
         and run themselves, and say what it will affect.
-        - Be concise. Put SQL in ```sql code blocks (the user can open them in a query tab). \
-        Use small markdown tables for tabular results.
+        - When the user wants to see rows, open them with open_table (use filters for specific rows) instead of \
+        pasting long results. Use open_query_tab for longer queries and for any change you propose; it isn't run \
+        until the user runs it.
+        - Be concise. Put short SQL in ```sql code blocks (the user can open them in a query tab). \
+        Use small markdown tables for small results.
         - <arsip_context> describes what the user currently has open in Arsip.
         """
     }
@@ -267,6 +285,7 @@ final class AssistantModel {
                 guard let id = block["id"] as? String, !containsTool(id) else { continue }
                 let input = block["input"] as? [String: Any] ?? [:]
                 let name = (block["name"] as? String ?? "").replacingOccurrences(of: "mcp__arsip__", with: "")
+                toolInputs[id] = input
                 let detail = input["sql"] as? String ?? input["table"] as? String ?? input["schema"] as? String ?? ""
                 appendBlock(.tool(ToolCall(id: id, name: name, detail: detail)))
             }
@@ -282,7 +301,10 @@ final class AssistantModel {
                     let parts = block["content"] as? [[String: Any]] ?? []
                     text = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
                 }
-                updateTool(id, output: text, isError: block["is_error"] as? Bool ?? false)
+                let isError = block["is_error"] as? Bool ?? false
+                if updateTool(id, output: text, isError: isError), !isError {
+                    performAction(for: id)
+                }
             }
 
         case "result":
@@ -337,18 +359,41 @@ final class AssistantModel {
         messages.last?.blocks.contains { $0.id == id } ?? false
     }
 
-    private func updateTool(_ id: String, output: String, isError: Bool) {
-        guard !messages.isEmpty else { return }
+    private func performAction(for toolID: String) {
+        guard let input = toolInputs.removeValue(forKey: toolID),
+              case .tool(let call)? = messages.last?.blocks.first(where: { $0.id == toolID })
+        else { return }
+        switch call.name {
+        case "open_table":
+            guard let table = input["table"] as? String else { return }
+            let filters = (input["filters"] as? [[String: Any]] ?? []).compactMap { filter -> ColumnFilter? in
+                guard let column = filter["column"] as? String, let value = filter["value"] else { return nil }
+                return ColumnFilter(column: column, value: value as? String ?? "\(value)")
+            }
+            onAction?(.openTable(name: table, filters: filters))
+        case "open_query_tab":
+            if let sql = input["sql"] as? String { onAction?(.openQuery(sql: sql)) }
+        default:
+            break
+        }
+    }
+
+    /// Returns true the first time a result arrives for this call.
+    @discardableResult
+    private func updateTool(_ id: String, output: String, isError: Bool) -> Bool {
+        guard !messages.isEmpty else { return false }
         let index = messages.count - 1
         for (blockIndex, block) in messages[index].blocks.enumerated() {
             if case .tool(var call) = block, call.id == id {
+                guard call.output == nil else { return false }
                 call.output = output
                 call.isError = isError
                 messages[index].blocks[blockIndex] = .tool(call)
                 revision += 1
-                return
+                return true
             }
         }
+        return false
     }
 
     private func dropEmptyReply() {
