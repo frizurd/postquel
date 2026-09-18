@@ -28,12 +28,16 @@ struct QueryEditorView: View {
                     )
                     Divider()
                 }
-                SQLEditor(
-                    text: $model.text,
-                    activeRange: model.active?.range,
-                    onSelectionChange: { model.updateSelection(range: $0) },
-                    onRun: { Task { await model.runCurrent() } }
-                )
+                ZStack(alignment: .bottomTrailing) {
+                    SQLEditor(
+                        text: $model.text,
+                        activeRange: model.active?.range,
+                        onSelectionChange: { model.updateSelection(range: $0) },
+                        onRun: { Task { await model.runCurrent() } }
+                    )
+                    runControl
+                        .padding(12)
+                }
             }
             .frame(minHeight: 120, idealHeight: 260)
 
@@ -51,24 +55,6 @@ struct QueryEditorView: View {
 
     private var editorBar: some View {
         HStack(spacing: 8) {
-            // One button that swaps label, at a fixed width: the row mustn't shift when a query starts.
-            Button {
-                if model.isRunning {
-                    model.cancel()
-                } else {
-                    Task { await model.runCurrent() }
-                }
-            } label: {
-                Label(model.isRunning ? "Cancel" : "Run", systemImage: model.isRunning ? "stop.fill" : "play.fill")
-                    .frame(width: 62)
-            }
-            .help(model.isRunning ? "Cancel the running query" : "Run the statement at the cursor (⌘↩)")
-
-            ProgressView()
-                .controlSize(.small)
-                .opacity(model.isRunning ? 1 : 0)
-                .frame(width: 14)
-
             if generator != nil {
                 Button { showsPrompt.toggle() } label: {
                     Label("Ask AI", systemImage: "sparkles")
@@ -167,6 +153,31 @@ struct QueryEditorView: View {
         }
     }
 
+    private var runControl: some View {
+        HStack(spacing: 8) {
+            if model.isRunning {
+                ProgressView().controlSize(.small)
+            }
+            Button {
+                if model.isRunning {
+                    model.cancel()
+                } else {
+                    Task { await model.runCurrent() }
+                }
+            } label: {
+                Label(model.isRunning ? "Cancel" : "Run", systemImage: model.isRunning ? "stop.fill" : "play.fill")
+                    .frame(width: 58)
+            }
+            .buttonStyle(SoftButtonStyle(prominent: !model.isRunning))
+            .help(model.isRunning ? "Cancel the running query" : "Run the statement at the cursor (⌘↩)")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous).strokeBorder(.quaternary))
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+    }
+
     @ViewBuilder
     private func speedBadge(_ duration: TimeInterval) -> some View {
         let speed = QuerySpeed(duration: duration, failed: model.error != nil)
@@ -215,7 +226,12 @@ struct QueryEditorView: View {
                 }
             }
             Spacer()
-            if let duration = model.duration {
+            if model.isRunning {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text(formatDuration(model.elapsed)).monospacedDigit()
+                }
+            } else if let duration = model.duration {
                 speedBadge(duration)
             }
         }

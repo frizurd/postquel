@@ -67,8 +67,8 @@ struct BrowserView: View {
             List(selection: Binding(get: { session.sidebarSelection }, set: { session.sidebarSelected($0) })) {
                 Section {
                     sidebarRow("New Query", symbol: "terminal").tag(SidebarItem.query)
-                    ForEach(session.savedQueries) { query in
-                        sidebarRow(query.name, symbol: "text.alignleft")
+                    ForEach(Array(session.savedQueries.enumerated()), id: \.element.id) { index, query in
+                        sidebarRow(query.name, number: index + 1)
                             .tag(SidebarItem.savedQuery(query.id))
                             .contextMenu {
                                 Button("Rename…") { renamingQuery = query }
@@ -171,6 +171,22 @@ struct BrowserView: View {
         .padding(.trailing, 8)
         .frame(height: TitleBar.height)
         .background { Color.clear.titleBarBehavior() }
+    }
+
+    /// Saved queries are numbered instead of carrying an icon.
+    private func sidebarRow(_ title: String, number: Int) -> some View {
+        HStack(spacing: 9) {
+            Text("\(number).")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(width: 17, alignment: .trailing)
+            Text(title)
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.vertical, 2)
     }
 
     private func sidebarRow(_ title: String, symbol: String) -> some View {

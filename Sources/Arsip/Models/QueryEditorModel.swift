@@ -20,6 +20,8 @@ final class QueryEditorModel {
     private(set) var results: [StatementResult] = []
     private(set) var error: String?
     private(set) var duration: TimeInterval?
+    /// Counts up while a query runs, so long ones don't look stuck.
+    private(set) var elapsed: TimeInterval = 0
     /// Note about what ⌘↩ actually ran, e.g. when several statements were selected.
     private(set) var lastRunNote: String?
     /// The statement that produced the current results, for the "why is this slow?" prompt.
@@ -79,7 +81,19 @@ final class QueryEditorModel {
 
         isRunning = true
         lastRunSQL = sql
-        defer { isRunning = false }
+        elapsed = 0
+        let started = Date()
+        let ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard let self, self.isRunning else { return }
+                self.elapsed = Date().timeIntervalSince(started)
+            }
+        }
+        defer {
+            ticker.cancel()
+            isRunning = false
+        }
         let outcome = await connection.execute(sql)
         selectedCell = nil
         results = outcome.results
