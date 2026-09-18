@@ -51,15 +51,12 @@ struct ConnectionFooter: View {
     }
 
     private var label: some View {
+        // Icon column and spacing match the table rows above, so everything lines up.
         HStack(spacing: 9) {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(.tint.opacity(0.16))
-                .frame(width: 28, height: 28)
-                .overlay {
-                    Image(systemName: "cylinder.split.1x2.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.tint)
-                }
+            Image(systemName: "cylinder.split.1x2.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.tint)
+                .frame(width: 17, alignment: .center)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.config.database)
                     .font(.system(size: 13, weight: .semibold))
@@ -71,13 +68,13 @@ struct ConnectionFooter: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer(minLength: 2)
+            Spacer(minLength: 4)
             Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
             .fill(isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))

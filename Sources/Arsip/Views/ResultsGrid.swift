@@ -35,8 +35,8 @@ struct ResultsGrid: NSViewRepresentable {
         let coordinator = context.coordinator
         let table = GridTableView()
         table.style = .plain
-        table.usesAlternatingRowBackgroundColors = false
-        table.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
+        table.usesAlternatingRowBackgroundColors = true
+        table.gridStyleMask = [.solidVerticalGridLineMask]
         table.gridColor = Theme.separator
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.allowsMultipleSelection = true
