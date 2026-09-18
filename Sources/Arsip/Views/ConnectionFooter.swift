@@ -38,7 +38,17 @@ struct ConnectionFooter: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
-            .padding(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Drawn over the menu: inside its label the trailing chevron gets clipped away.
+            .overlay(alignment: .trailing) {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .padding(.trailing, 8)
+                    .allowsHitTesting(false)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: Theme.barHeight)
         }
         .background(.bar)
         .onHover { isHovered = $0 }
@@ -50,36 +60,26 @@ struct ConnectionFooter: View {
         }
     }
 
+    /// One line, the same height as the status bar on the right, with the icon column and
+    /// spacing of the table rows above.
     private var label: some View {
-        // Icon column and spacing match the table rows above, so everything lines up.
         HStack(spacing: 9) {
             Image(systemName: "cylinder.split.1x2.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(.tint)
                 .frame(width: 17, alignment: .center)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session.config.database)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text("\(session.config.user)@\(session.config.host)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            Text(session.config.database)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 20)  // room for the chevron drawn over the menu
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
             .fill(isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .help(session.connection?.serverVersion ?? "")
+        .contentShape(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous))
+        .help("\(session.config.user)@\(session.config.host) · \(session.connection?.serverVersion ?? "")")
     }
 }
 
