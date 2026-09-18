@@ -11,8 +11,9 @@ struct SQLEditor: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+    func makeNSView(context: Context) -> EditorContainer {
+        let container = EditorContainer()
+        let scroll = container.scroll
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
@@ -56,12 +57,14 @@ struct SQLEditor: NSViewRepresentable {
         if let storage = textView.textStorage { SQLHighlighter.highlight(storage, active: activeRange) }
 
         scroll.documentView = textView
-        return scroll
+        container.attach(textView)
+        return container
     }
 
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
+    func updateNSView(_ container: EditorContainer, context: Context) {
         context.coordinator.parent = self
-        guard let textView = scroll.documentView as? SQLTextView else { return }
+        container.gutter.needsDisplay = true
+        guard let textView = container.scroll.documentView as? SQLTextView else { return }
         if context.coordinator.activeRange != activeRange {
             context.coordinator.activeRange = activeRange
             if let storage = textView.textStorage { SQLHighlighter.highlight(storage, active: activeRange) }
@@ -110,6 +113,17 @@ final class SQLTextView: NSTextView {
     var onRun: (() -> Void)?
     /// Re-applies colors; the coordinator sets this up.
     var rehighlight: (() -> Void)?
+    weak var gutter: GutterView?
+
+    override func didChangeText() {
+        super.didChangeText()
+        gutter?.needsDisplay = true
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        gutter?.needsDisplay = true
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -199,5 +213,128 @@ enum SQLHighlighter {
         where range.length > 0 {
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
         }
+    }
+}
+
+/// The editor and its line numbers side by side. The numbers are a plain sibling view rather than
+/// an NSRulerView: a ruler inside the scroll view stopped the text view drawing and taking input.
+final class EditorContainer: NSView {
+    let scroll = NSScrollView()
+    let gutter = GutterView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addSubview(gutter)
+        addSubview(scroll)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func attach(_ textView: SQLTextView) {
+        gutter.textView = textView
+        textView.gutter = gutter
+        // Redraw the numbers while scrolling.
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
+        ) { [weak gutter] _ in
+            MainActor.assumeIsolated { gutter?.needsDisplay = true }
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        let width = gutter.preferredWidth
+        gutter.frame = NSRect(x: 0, y: 0, width: width, height: bounds.height)
+        scroll.frame = NSRect(x: width, y: 0, width: max(bounds.width - width, 0), height: bounds.height)
+    }
+}
+
+/// Draws line numbers for the editor next to it, with the cursor's line at full contrast.
+final class GutterView: NSView {
+    weak var textView: SQLTextView?
+    private static let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+
+    override var isFlipped: Bool { true }
+
+    var preferredWidth: CGFloat {
+        let lines = max((textView?.string as NSString?)?.lineCount ?? 1, 1)
+        return max(34, CGFloat("\(lines)".count) * 7 + 20)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.textBackgroundColor.setFill()
+        dirtyRect.fill()
+
+        guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer
+        else { return }
+        let text = textView.string as NSString
+        let inset = textView.textContainerInset.height
+        let visible = textView.visibleRect
+        let cursorLine = text.lineNumber(at: textView.selectedRange().location)
+        let lineHeight = layoutManager.defaultLineHeight(for: textView.font ?? SQLHighlighter.font)
+
+        func drawNumber(_ line: Int, atTextY y: CGFloat, height: CGFloat) {
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: Self.font,
+                .foregroundColor: line == cursorLine ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor,
+            ]
+            let label = "\(line)" as NSString
+            let size = label.size(withAttributes: attributes)
+            let gutterY = y + inset - visible.minY + (height - size.height) / 2
+            guard gutterY > -height, gutterY < bounds.height else { return }
+            label.draw(at: NSPoint(x: bounds.width - size.width - 8, y: gutterY), withAttributes: attributes)
+        }
+
+        guard text.length > 0 else {
+            drawNumber(1, atTextY: 0, height: lineHeight)
+            return
+        }
+
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: container)
+        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        var index = text.paragraphStart(of: charRange.location)
+        var line = text.lineNumber(at: index)
+
+        while index < text.length, index <= charRange.upperBound {
+            let fragment = layoutManager.lineFragmentRect(forGlyphAt: layoutManager.glyphIndexForCharacter(at: index),
+                                                          effectiveRange: nil, withoutAdditionalLayout: false)
+            drawNumber(line, atTextY: fragment.minY, height: fragment.height)
+
+            var paragraphEnd = 0
+            text.getParagraphStart(nil, end: &paragraphEnd, contentsEnd: nil, for: NSRange(location: index, length: 0))
+            guard paragraphEnd > index else { break }
+            index = paragraphEnd
+            line += 1
+        }
+        // A trailing newline leaves one more, empty, line.
+        if text.character(at: text.length - 1) == 0x0A, charRange.upperBound >= text.length {
+            let fragment = layoutManager.extraLineFragmentRect
+            drawNumber(line, atTextY: fragment.minY, height: fragment.height > 0 ? fragment.height : lineHeight)
+        }
+    }
+}
+
+private extension NSString {
+    var lineCount: Int {
+        var lines = 1
+        enumerateSubstrings(in: NSRange(location: 0, length: length), options: [.byLines, .substringNotRequired]) { _, _, _, _ in
+            lines += 1
+        }
+        return lines
+    }
+
+    func lineNumber(at location: Int) -> Int {
+        guard location > 0, length > 0 else { return 1 }
+        var line = 1
+        enumerateSubstrings(in: NSRange(location: 0, length: min(location, length)),
+                            options: [.byLines, .substringNotRequired]) { _, _, _, _ in line += 1 }
+        return line
+    }
+
+    func paragraphStart(of location: Int) -> Int {
+        var start = 0
+        getParagraphStart(&start, end: nil, contentsEnd: nil, for: NSRange(location: min(location, length), length: 0))
+        return start
     }
 }
