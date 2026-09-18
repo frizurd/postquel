@@ -39,16 +39,16 @@ struct ConnectionFooter: View {
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)  // same inset as the sidebar's row highlights
             // Drawn over the menu: inside its label the trailing chevron gets clipped away.
             .overlay(alignment: .trailing) {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                    .padding(.trailing, 8)
+                    .padding(.trailing, 14)
                     .allowsHitTesting(false)
             }
-            .padding(.horizontal, 6)
-            .frame(height: Theme.barHeight)
+            .frame(height: 36)
         }
         .background(.bar)
         .onHover { isHovered = $0 }
@@ -60,8 +60,8 @@ struct ConnectionFooter: View {
         }
     }
 
-    /// One line, the same height as the status bar on the right, with the icon column and
-    /// spacing of the table rows above.
+    /// Same icon column, spacing and text position as the table rows above: the icon starts
+    /// 18pt from the sidebar edge (6pt highlight inset + 12pt), the text 44pt.
     private var label: some View {
         HStack(spacing: 9) {
             Image(systemName: "cylinder.split.1x2.fill")
@@ -69,13 +69,14 @@ struct ConnectionFooter: View {
                 .foregroundStyle(.tint)
                 .frame(width: 17, alignment: .center)
             Text(session.config.database)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 13))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 20)  // room for the chevron drawn over the menu
+            Spacer(minLength: 24)  // room for the chevron drawn over the menu
         }
-        .padding(.horizontal, 10)  // lines the icon up with the table rows above
-        .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
             .fill(isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))
         .contentShape(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous))
