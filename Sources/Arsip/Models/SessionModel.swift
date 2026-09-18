@@ -127,6 +127,17 @@ struct WorkspaceTab: Identifiable {
     }
 }
 
+struct DatabaseInfo: Identifiable, Hashable {
+    let name: String
+    let owner: String
+    let encoding: String
+    let size: String
+    let connections: Int
+
+    var id: String { name }
+    var summary: String { "\(owner) · \(encoding) · \(size)" }
+}
+
 /// One window = one session = one connection.
 @MainActor @Observable
 final class SessionModel {
@@ -141,7 +152,7 @@ final class SessionModel {
 
     var schemas: [SchemaGroup] = []
     /// Databases on this server the user may connect to.
-    private(set) var databases: [String] = []
+    private(set) var databases: [DatabaseInfo] = []
     /// The settings that opened the current connection, password included, for switching databases.
     @ObservationIgnored private var activeConfig: ConnectionConfig?
     var sidebarFilter = ""
@@ -234,12 +245,45 @@ final class SessionModel {
     func loadDatabases() async {
         guard let connection else { return }
         let sql = """
-            SELECT datname FROM pg_database
-            WHERE NOT datistemplate AND has_database_privilege(datname, 'CONNECT')
-            ORDER BY datname
+            SELECT d.datname,
+                   pg_get_userbyid(d.datdba) AS owner,
+                   pg_encoding_to_char(d.encoding) AS encoding,
+                   pg_size_pretty(pg_database_size(d.datname)) AS size,
+                   (SELECT count(*) FROM pg_stat_activity a WHERE a.datname = d.datname) AS connections
+            FROM pg_database d
+            WHERE NOT d.datistemplate AND has_database_privilege(d.datname, 'CONNECT')
+            ORDER BY d.datname
             """
         guard let rows = await connection.execute(sql).results.first?.rows else { return }
-        databases = (0..<rows.rowCount).compactMap { rows.value(row: $0, column: 0) }
+        databases = (0..<rows.rowCount).compactMap { row in
+            guard let name = rows.value(row: row, column: 0) else { return nil }
+            return DatabaseInfo(
+                name: name,
+                owner: rows.value(row: row, column: 1) ?? "",
+                encoding: rows.value(row: row, column: 2) ?? "",
+                size: rows.value(row: row, column: 3) ?? "",
+                connections: rows.value(row: row, column: 4).flatMap(Int.init) ?? 0
+            )
+        }
+    }
+
+    /// DDL for databases can't run inside a transaction, so these go straight to the server.
+    func renameDatabase(_ name: String, to newName: String) async -> String? {
+        guard name != config.database else { return "Can't rename the database you're connected to. Switch to another one first." }
+        let outcome = await connection?.execute("ALTER DATABASE \(quoteIdent(name)) RENAME TO \(quoteIdent(newName))")
+        if let error = outcome?.error { return error }
+        await loadDatabases()
+        return nil
+    }
+
+    func dropDatabase(_ name: String, closingConnections: Bool) async -> String? {
+        guard name != config.database else { return "Can't drop the database you're connected to. Switch to another one first." }
+        let force = closingConnections ? " WITH (FORCE)" : ""
+        let outcome = await connection?.execute("DROP DATABASE \(quoteIdent(name))\(force)")
+        if let error = outcome?.error { return error }
+        UserDefaults.standard.removeObject(forKey: "workspace.\(config.user)@\(config.host):\(config.port)/\(name)")
+        await loadDatabases()
+        return nil
     }
 
     func disconnect() {
