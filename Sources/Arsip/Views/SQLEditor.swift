@@ -56,13 +56,6 @@ struct SQLEditor: NSViewRepresentable {
         if let storage = textView.textStorage { SQLHighlighter.highlight(storage, active: activeRange) }
 
         scroll.documentView = textView
-
-        let ruler = LineNumberRuler(textView: textView)
-        scroll.verticalRulerView = ruler
-        scroll.hasVerticalRuler = true
-        scroll.rulersVisible = true
-        textView.lineNumbers = ruler
-
         return scroll
     }
 
@@ -115,17 +108,6 @@ struct SQLEditor: NSViewRepresentable {
 
 final class SQLTextView: NSTextView {
     var onRun: (() -> Void)?
-    weak var lineNumbers: LineNumberRuler?
-
-    override func didChangeText() {
-        super.didChangeText()
-        lineNumbers?.needsDisplay = true
-    }
-
-    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
-        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
-        lineNumbers?.needsDisplay = true
-    }
     /// Re-applies colors; the coordinator sets this up.
     var rehighlight: (() -> Void)?
 
@@ -217,109 +199,5 @@ enum SQLHighlighter {
         where range.length > 0 {
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
         }
-    }
-}
-
-/// Line numbers down the left of the editor, like an IDE. The line the cursor is on stands out.
-final class LineNumberRuler: NSRulerView {
-    private static let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
-
-    init(textView: NSTextView) {
-        super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
-        clientView = textView
-        ruleThickness = 34
-        // Redraw while scrolling.
-        if let clipView = textView.enclosingScrollView?.contentView {
-            clipView.postsBoundsChangedNotifications = true
-            NotificationCenter.default.addObserver(
-                forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.needsDisplay = true }
-            }
-        }
-    }
-
-    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Drawn in full: the default ruler paints a border down its edge, which ran past the
-    /// editor and into the bar above it.
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.textBackgroundColor.setFill()
-        dirtyRect.fill()
-        drawHashMarksAndLabels(in: dirtyRect)
-    }
-
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let textView = clientView as? NSTextView,
-              let layoutManager = textView.layoutManager,
-              let container = textView.textContainer
-        else { return }
-
-        let text = textView.string as NSString
-        let inset = textView.textContainerInset.height
-        let cursorLine = lineNumber(at: textView.selectedRange().location, in: text)
-
-        /// Line fragment positions are in the text view; the ruler scrolls with it.
-        func rulerY(_ fragmentMinY: CGFloat) -> CGFloat {
-            convert(NSPoint(x: 0, y: fragmentMinY + inset), from: textView).y
-        }
-
-        let lineHeight = layoutManager.defaultLineHeight(for: textView.font ?? SQLHighlighter.font)
-        guard text.length > 0 else {
-            draw(line: 1, at: rulerY(0), isCurrent: true, height: lineHeight)
-            return
-        }
-
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: container)
-        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-
-        var index = paragraphStart(of: charRange.location, in: text)
-        var line = lineNumber(at: index, in: text)
-        while index < text.length, index <= charRange.upperBound {
-            let glyphIndex = layoutManager.glyphIndexForCharacter(at: index)
-            let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil,
-                                                          withoutAdditionalLayout: false)
-            draw(line: line, at: rulerY(fragment.minY), isCurrent: line == cursorLine, height: fragment.height)
-
-            var paragraphEnd = 0
-            text.getParagraphStart(nil, end: &paragraphEnd, contentsEnd: nil, for: NSRange(location: index, length: 0))
-            guard paragraphEnd > index else { break }
-            index = paragraphEnd
-            line += 1
-        }
-
-        // A trailing newline leaves one more (empty) line with no glyphs of its own.
-        if text.character(at: text.length - 1) == 0x0A, charRange.upperBound >= text.length {
-            let fragment = layoutManager.extraLineFragmentRect
-            draw(line: line, at: rulerY(fragment.minY), isCurrent: line == cursorLine,
-                 height: fragment.height > 0 ? fragment.height : lineHeight)
-        }
-    }
-
-    private func paragraphStart(of location: Int, in text: NSString) -> Int {
-        var start = 0
-        text.getParagraphStart(&start, end: nil, contentsEnd: nil,
-                               for: NSRange(location: min(location, text.length), length: 0))
-        return start
-    }
-
-    private func draw(line: Int, at y: CGFloat, isCurrent: Bool, height: CGFloat) {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Self.font,
-            .foregroundColor: isCurrent ? NSColor.labelColor : NSColor.tertiaryLabelColor,
-        ]
-        let label = "\(line)" as NSString
-        let size = label.size(withAttributes: attributes)
-        label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: y + (height - size.height) / 2),
-                   withAttributes: attributes)
-    }
-
-    /// 1-based line number of a character offset.
-    private func lineNumber(at location: Int, in text: NSString) -> Int {
-        guard location > 0, text.length > 0 else { return 1 }
-        var line = 1
-        text.enumerateSubstrings(in: NSRange(location: 0, length: min(location, text.length)),
-                                 options: [.byLines, .substringNotRequired]) { _, _, _, _ in line += 1 }
-        return line
     }
 }
