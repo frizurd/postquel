@@ -58,6 +58,9 @@ struct BrowserView: View {
     @AppStorage("inspectorMode") private var inspectorMode = InspectorMode.value
     @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
     @State private var showsQuickOpen = false
+    @State private var showsNewDatabase = false
+    @State private var newDatabaseName = ""
+    @State private var newDatabaseError: String?
 
     private var isSidebarVisible: Bool { columnVisibility != .detailOnly }
 
@@ -166,6 +169,77 @@ struct BrowserView: View {
         }
     }
 
+    /// Switch database, or create one, from the sidebar footer.
+    private var databaseMenu: some View {
+        Menu {
+            ForEach(session.databases, id: \.self) { database in
+                Button {
+                    Task { await session.switchDatabase(to: database) }
+                } label: {
+                    if database == session.config.database {
+                        Label(database, systemImage: "checkmark")
+                    } else {
+                        Text(database)
+                    }
+                }
+            }
+            Divider()
+            Button("New Database…") {
+                newDatabaseName = ""
+                newDatabaseError = nil
+                showsNewDatabase = true
+            }
+            Button("Reload List") { Task { await session.loadDatabases() } }
+        } label: {
+            HStack(spacing: 4) {
+                Text(session.config.database).font(.headline).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .sheet(isPresented: $showsNewDatabase) { newDatabaseSheet }
+    }
+
+    private var newDatabaseSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New Database").font(.headline)
+            TextField("Name", text: $newDatabaseName)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 280)
+                .onSubmit { createDatabase() }
+            if let newDatabaseError {
+                Text(newDatabaseError)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: 280, alignment: .leading)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { showsNewDatabase = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Create") { createDatabase() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newDatabaseName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(18)
+    }
+
+    private func createDatabase() {
+        let name = newDatabaseName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        Task {
+            if let error = await session.createDatabase(named: name) {
+                newDatabaseError = error
+            } else {
+                showsNewDatabase = false
+            }
+        }
+    }
+
     private var connectionFooter: some View {
         VStack(spacing: 0) {
             Divider()
@@ -174,9 +248,7 @@ struct BrowserView: View {
                     .font(.title3)
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(session.config.database)
-                        .font(.headline)
-                        .lineLimit(1)
+                    databaseMenu
                     Text("\(session.config.host) · \(session.connection?.serverVersion ?? "")")
                         .font(.caption)
                         .foregroundStyle(.secondary)

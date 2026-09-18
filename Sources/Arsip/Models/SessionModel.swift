@@ -140,6 +140,10 @@ final class SessionModel {
     var connectError: String?
 
     var schemas: [SchemaGroup] = []
+    /// Databases on this server the user may connect to.
+    private(set) var databases: [String] = []
+    /// The settings that opened the current connection, password included, for switching databases.
+    @ObservationIgnored private var activeConfig: ConnectionConfig?
     var sidebarFilter = ""
     private(set) var tabs: [WorkspaceTab] = []
     private(set) var activeTabID: UUID?
@@ -188,6 +192,7 @@ final class SessionModel {
             UserDefaults.standard.set(true, forKey: Self.reconnectKey)
 
             self.connection = connection
+            activeConfig = attempt
             let assistant = AssistantModel(config: attempt, serverVersion: connection.serverVersion)
             assistant.contextProvider = { [weak self] in self?.assistantContext }
             assistant.onAction = { [weak self] action in
@@ -200,14 +205,52 @@ final class SessionModel {
             sqlGenerator = SQLGenerator(config: attempt)
             restoreWorkspace()
             await refreshCatalog()
+            await loadDatabases()
         } catch {
             connectError = error.localizedDescription
         }
     }
 
+    /// Reconnects to another database on the same server, keeping that database's own tabs.
+    func switchDatabase(to name: String) async {
+        guard name != config.database, var attempt = activeConfig else { return }
+        saveWorkspace()
+        teardown()
+        attempt.database = name
+        config.database = name
+        config.password = attempt.password  // the new database has its own Keychain entry, if any
+        await connect()
+    }
+
+    func createDatabase(named name: String) async -> String? {
+        guard let connection else { return "Not connected" }
+        let outcome = await connection.execute("CREATE DATABASE \(quoteIdent(name))")
+        if let error = outcome.error { return error }
+        await loadDatabases()
+        await switchDatabase(to: name)
+        return connectError
+    }
+
+    func loadDatabases() async {
+        guard let connection else { return }
+        let sql = """
+            SELECT datname FROM pg_database
+            WHERE NOT datistemplate AND has_database_privilege(datname, 'CONNECT')
+            ORDER BY datname
+            """
+        guard let rows = await connection.execute(sql).results.first?.rows else { return }
+        databases = (0..<rows.rowCount).compactMap { rows.value(row: $0, column: 0) }
+    }
+
     func disconnect() {
         saveWorkspace()
         UserDefaults.standard.set(false, forKey: Self.reconnectKey)
+        activeConfig = nil
+        databases = []
+        teardown()
+    }
+
+    private func teardown() {
         assistant?.stop()
         assistant = nil
         sqlGenerator?.cancel()
