@@ -58,6 +58,7 @@ struct BrowserView: View {
     @AppStorage("inspectorMode") private var inspectorMode = InspectorMode.value
     @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
     @State private var showsQuickOpen = false
+    @State private var renamingQuery: SavedQuery?
 
     private var isSidebarVisible: Bool { columnVisibility != .detailOnly }
 
@@ -65,7 +66,17 @@ struct BrowserView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: Binding(get: { session.sidebarSelection }, set: { session.sidebarSelected($0) })) {
                 Section {
-                    sidebarRow("SQL Query", symbol: "terminal").tag(SidebarItem.query)
+                    sidebarRow("New Query", symbol: "terminal").tag(SidebarItem.query)
+                    ForEach(session.savedQueries) { query in
+                        sidebarRow(query.name, symbol: "text.alignleft")
+                            .tag(SidebarItem.savedQuery(query.id))
+                            .contextMenu {
+                                Button("Rename…") { renamingQuery = query }
+                                Button("Delete", role: .destructive) { session.deleteQuery(query.id) }
+                            }
+                    }
+                } header: {
+                    Text("Queries").sectionLabel()
                 }
                 ForEach(session.filteredSchemas) { group in
                     Section {
@@ -131,6 +142,9 @@ struct BrowserView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: showsQuickOpen)
+        .sheet(item: $renamingQuery) { query in
+            RenameQuerySheet(name: query.name) { session.renameQuery(query.id, to: $0) }
+        }
     }
 
     /// Tabs and buttons in the title bar row. The buttons are anchored to the detail column's
@@ -202,7 +216,8 @@ struct BrowserView: View {
                     inspectorMode = .assistant
                     showsInspector = true
                     session.assistant?.send(prompt)
-                }
+                },
+                onSaveQuery: { name in session.saveQuery(named: name, from: editor) }
             )
         case .table(let browser):
             TableBrowserView(

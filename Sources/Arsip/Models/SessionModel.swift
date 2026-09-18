@@ -85,13 +85,14 @@ struct SchemaGroup: Identifiable {
 
 enum SidebarItem: Hashable {
     case query
+    case savedQuery(UUID)
     case relation(RelationRef)
 }
 
 /// What gets restored on the next connect: open tabs and which one was active.
 struct WorkspaceSnapshot: Codable {
     enum Tab: Codable {
-        case query(text: String)
+        case query(text: String, savedQueryID: UUID?, name: String?)
         case table(schema: String, name: String, kind: RelationKind, filters: [ColumnFilter], sort: GridSort?)
     }
 
@@ -110,7 +111,7 @@ struct WorkspaceTab: Identifiable {
 
     @MainActor var title: String {
         switch content {
-        case .query: "SQL Query"
+        case .query(let editor): editor.name ?? "Query"
         case .table(let browser): browser.title
         }
     }
@@ -122,9 +123,9 @@ struct WorkspaceTab: Identifiable {
         }
     }
 
-    var sidebarItem: SidebarItem {
+    @MainActor var sidebarItem: SidebarItem {
         switch content {
-        case .query: .query
+        case .query(let editor): editor.savedQueryID.map(SidebarItem.savedQuery) ?? .query
         case .table(let browser): .relation(browser.relation)
         }
     }
@@ -160,6 +161,8 @@ final class SessionModel {
     var schemas: [SchemaGroup] = []
     /// Databases on this server the user may connect to.
     private(set) var databases: [DatabaseInfo] = []
+    /// Named queries belonging to the database that's open.
+    private(set) var savedQueries: [SavedQuery] = []
     /// The settings that opened the current connection, password included, for switching databases.
     @ObservationIgnored private var activeConfig: ConnectionConfig?
     var sidebarFilter = ""
@@ -264,6 +267,7 @@ final class SessionModel {
             }
             self.assistant = assistant
             sqlGenerator = SQLGenerator(config: attempt)
+            savedQueries = QueryStore.load(config.account)
             restoreWorkspace()
             await refreshCatalog()
             await loadDatabases()
@@ -276,6 +280,8 @@ final class SessionModel {
     func switchDatabase(to name: String) async {
         guard name != config.database, var attempt = activeConfig else { return }
         saveWorkspace()
+        persistQueryTexts()
+        savedQueries = []
         teardown()  // the SSH tunnel stays open; only the database changes
         attempt.database = name
         attempt.accountKey = savedConnection?.accountKey(database: name)
@@ -341,6 +347,7 @@ final class SessionModel {
         tunnel = nil
         savedConnection = nil
         saveWorkspace()
+        savedQueries = []
         UserDefaults.standard.set(false, forKey: Self.reconnectKey)
         activeConfig = nil
         databases = []
@@ -439,8 +446,10 @@ final class SessionModel {
             if let tab = tabs.first(where: { $0.sidebarItem == .query }) {
                 activate(tab.id)
             } else {
-                openQueryTab(restoreSavedText: true)
+                openQueryTab()
             }
+        case .savedQuery(let id):
+            if let query = savedQueries.first(where: { $0.id == id }) { openSavedQuery(query) }
         case .relation(let relation):
             guard activeTab?.sidebarItem != item, let tab = makeTableTab(relation) else { return }
             if case .table = activeTab?.content, let index = tabs.firstIndex(where: { $0.id == activeTabID }) {
@@ -463,12 +472,71 @@ final class SessionModel {
         if let tab = makeTableTab(relation, filters: filters) { insertTab(tab) }
     }
 
-    func openQueryTab(restoreSavedText: Bool = false) {
-        insertTab(makeQueryTab(text: nil, restoreSavedText: restoreSavedText))
+    func openQueryTab() {
+        insertTab(makeQueryTab(text: ""))
     }
 
     func openQueryTab(text: String) {
         insertTab(makeQueryTab(text: text))
+    }
+
+    // MARK: Saved queries
+
+    func openSavedQuery(_ query: SavedQuery) {
+        if let existing = tabs.first(where: { $0.sidebarItem == .savedQuery(query.id) }) {
+            activate(existing.id)
+        } else {
+            insertTab(makeQueryTab(text: query.sql, savedQueryID: query.id, name: query.name))
+        }
+    }
+
+    /// Names the query a tab holds, adding it to this database's list.
+    func saveQuery(named name: String, from editor: QueryEditorModel) {
+        let query = SavedQuery(name: name, sql: editor.text)
+        savedQueries.append(query)
+        editor.savedQueryID = query.id
+        editor.name = name
+        persistQueries()
+        scheduleSave()
+    }
+
+    func renameQuery(_ id: UUID, to name: String) {
+        guard let index = savedQueries.firstIndex(where: { $0.id == id }) else { return }
+        savedQueries[index].name = name
+        for tab in tabs {
+            if case .query(let editor) = tab.content, editor.savedQueryID == id { editor.name = name }
+        }
+        persistQueries()
+    }
+
+    func deleteQuery(_ id: UUID) {
+        savedQueries.removeAll { $0.id == id }
+        for tab in tabs {
+            if case .query(let editor) = tab.content, editor.savedQueryID == id {
+                editor.savedQueryID = nil  // the tab stays open, just unnamed now
+                editor.name = nil
+            }
+        }
+        persistQueries()
+    }
+
+    private func persistQueries() {
+        QueryStore.save(savedQueries, for: config.account)
+    }
+
+    /// Writes the text of every tab backed by a saved query.
+    private func persistQueryTexts() {
+        var changed = false
+        for tab in tabs {
+            guard case .query(let editor) = tab.content, let id = editor.savedQueryID,
+                  let index = savedQueries.firstIndex(where: { $0.id == id }),
+                  savedQueries[index].sql != editor.text
+            else { continue }
+            savedQueries[index].sql = editor.text
+            savedQueries[index].updatedAt = Date()
+            changed = true
+        }
+        if changed { persistQueries() }
     }
 
     private func makeTableTab(_ relation: RelationRef, filters: [ColumnFilter] = [], sort: GridSort? = nil) -> WorkspaceTab? {
@@ -478,9 +546,8 @@ final class SessionModel {
         return WorkspaceTab(content: .table(browser))
     }
 
-    private func makeQueryTab(text: String?, restoreSavedText: Bool = false) -> WorkspaceTab {
-        let editor = QueryEditorModel(restoreSavedText: restoreSavedText)
-        if let text { editor.text = text }
+    private func makeQueryTab(text: String, savedQueryID: UUID? = nil, name: String? = nil) -> WorkspaceTab {
+        let editor = QueryEditorModel(text: text, savedQueryID: savedQueryID, name: name)
         editor.connection = connection
         editor.onTextChange = { [weak self] in self?.scheduleSave() }
         return WorkspaceTab(content: .query(editor))
@@ -513,6 +580,7 @@ final class SessionModel {
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
+            self?.persistQueryTexts()
             self?.saveWorkspace()
         }
     }
@@ -523,7 +591,7 @@ final class SessionModel {
             tabs: tabs.map { tab in
                 switch tab.content {
                 case .query(let editor):
-                    .query(text: editor.text)
+                    .query(text: editor.text, savedQueryID: editor.savedQueryID, name: editor.name)
                 case .table(let browser):
                     .table(schema: browser.relation.schema, name: browser.relation.name, kind: browser.relation.kind,
                            filters: browser.filters, sort: browser.sort)
@@ -543,13 +611,13 @@ final class SessionModel {
               let snapshot = try? JSONDecoder().decode(WorkspaceSnapshot.self, from: data),
               !snapshot.tabs.isEmpty
         else {
-            openQueryTab(restoreSavedText: true)
+            openQueryTab()
             return
         }
         tabs = snapshot.tabs.compactMap { saved in
             switch saved {
-            case .query(let text):
-                makeQueryTab(text: text)
+            case .query(let text, let savedQueryID, let name):
+                makeQueryTab(text: text, savedQueryID: savedQueryID, name: name)
             case .table(let schema, let name, let kind, let filters, let sort):
                 makeTableTab(RelationRef(schema: schema, name: name, kind: kind), filters: filters, sort: sort)
             }

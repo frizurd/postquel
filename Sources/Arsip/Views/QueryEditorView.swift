@@ -7,6 +7,9 @@ struct QueryEditorView: View {
     var onShowInspector: () -> Void
     /// Hands a prompt to the assistant panel and opens it.
     var onAskAssistant: ((String) -> Void)? = nil
+    /// Names an unsaved query so it joins this database's list.
+    var onSaveQuery: ((String) -> Void)? = nil
+    @State private var showsSaveQuery = false
     @State private var showsPrompt = false
 
     var body: some View {
@@ -36,6 +39,9 @@ struct QueryEditorView: View {
 
             resultsPane
                 .frame(minHeight: 140)
+        }
+        .sheet(isPresented: $showsSaveQuery) {
+            SaveQuerySheet { onSaveQuery?($0) }
         }
         .onChange(of: model.text) {
             model.refreshActiveStatement()
@@ -70,10 +76,22 @@ struct QueryEditorView: View {
                 .keyboardShortcut("l")
                 .help("Describe the query you want (⌘L)")
             }
+            if let name = model.name {
+                Label(name, systemImage: "text.alignleft")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else if onSaveQuery != nil {
+                Button { showsSaveQuery = true } label: {
+                    Label("Save Query", systemImage: "square.and.arrow.down")
+                }
+                .disabled(model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Keep this query in the sidebar for this database")
+            }
+            Spacer()
             Text(statementLabel.map { "⌘↩ runs \($0.lowercased())" } ?? "⌘↩ runs the statement at the cursor")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Spacer()
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
@@ -211,4 +229,39 @@ func rowCountText(_ count: Int) -> String {
 
 func formatDuration(_ seconds: TimeInterval) -> String {
     seconds < 1 ? "\(Int((seconds * 1000).rounded())) ms" : String(format: "%.2f s", seconds)
+}
+
+private struct SaveQuerySheet: View {
+    var onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Save Query").font(.headline)
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(save)
+            Text("Saved queries live in the sidebar of this database only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(18)
+        .frame(width: 320)
+    }
+
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        onSave(trimmed)
+        dismiss()
+    }
 }

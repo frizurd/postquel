@@ -46,11 +46,11 @@ struct TitlebarActions: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            Button { session.openQueryTab() } label: {
-                Image(systemName: "plus")
-            }
-            .keyboardShortcut("t")
-            .help("New SQL query tab (⌘T)")
+            // ⌘T still opens a query tab; the sidebar's New Query row is the visible way in.
+            Button("New Query Tab") { session.openQueryTab() }
+                .keyboardShortcut("t")
+                .frame(width: 0, height: 0)
+                .opacity(0)
 
             Button { Task { await session.refresh() } } label: {
                 Image(systemName: "arrow.clockwise")

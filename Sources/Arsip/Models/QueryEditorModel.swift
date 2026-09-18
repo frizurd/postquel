@@ -3,8 +3,6 @@ import Observation
 
 @MainActor @Observable
 final class QueryEditorModel {
-    private static let textKey = "editor.text"
-
     @ObservationIgnored var connection: PGConnection?
     /// Current editor selection; updated on every caret move, so not observed.
     @ObservationIgnored private var selectedRange = NSRange(location: 0, length: 0)
@@ -15,6 +13,9 @@ final class QueryEditorModel {
     @ObservationIgnored var onTextChange: (() -> Void)?
 
     var text: String
+    /// Set when this tab is backed by a saved query.
+    var savedQueryID: UUID?
+    var name: String?
     private(set) var isRunning = false
     private(set) var results: [StatementResult] = []
     private(set) var error: String?
@@ -28,11 +29,10 @@ final class QueryEditorModel {
     }
     var selectedCell: CellSelection?
 
-    init(restoreSavedText: Bool = false) {
-        text = restoreSavedText
-            ? UserDefaults.standard.string(forKey: Self.textKey)
-                ?? "-- ⌘↩ runs the statement the cursor is in\nSELECT now(), version();\n"
-            : ""
+    init(text: String = "", savedQueryID: UUID? = nil, name: String? = nil) {
+        self.text = text
+        self.savedQueryID = savedQueryID
+        self.name = name
     }
 
     var rowResultIndices: [Int] {
@@ -76,7 +76,6 @@ final class QueryEditorModel {
     func run(_ sql: String) async {
         let sql = sql.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let connection, !sql.isEmpty, !isRunning else { return }
-        UserDefaults.standard.set(text, forKey: Self.textKey)
 
         isRunning = true
         lastRunSQL = sql

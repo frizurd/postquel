@@ -74,7 +74,7 @@ struct ConnectionFooter: View {
                 .truncationMode(.middle)
             Spacer(minLength: 20)  // room for the chevron drawn over the menu
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)  // lines the icon up with the table rows above
         .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
             .fill(isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))
@@ -284,5 +284,39 @@ private struct SheetFrame<Content: View, Actions: View>: View {
         }
         .padding(18)
         .frame(width: width)
+    }
+}
+
+struct RenameQuerySheet: View {
+    let name: String
+    var onRename: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var newName = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename Query").font(.headline)
+            TextField("Name", text: $newName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(rename)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Rename", action: rename)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(18)
+        .frame(width: 320)
+        .onAppear { newName = name }
+    }
+
+    private func rename() {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        onRename(trimmed)
+        dismiss()
     }
 }
