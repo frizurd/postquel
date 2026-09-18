@@ -6,48 +6,18 @@ struct ConnectionFooter: View {
     @State private var isHovered = false
     @State private var showsNewDatabase = false
     @State private var showsManager = false
+    @State private var menuActions: AnyObject?
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
-            Menu {
-                Section("Databases") {
-                    ForEach(session.databases) { database in
-                        Button {
-                            Task { await session.switchDatabase(to: database.name) }
-                        } label: {
-                            if database.name == session.config.database {
-                                Label(database.name, systemImage: "checkmark")
-                            } else {
-                                Text(database.name)
-                            }
-                        }
-                    }
-                }
-                Section {
-                    Button("New Database…") { showsNewDatabase = true }
-                    Button("Manage Databases…") { showsManager = true }
-                    Button("Reload List") { Task { await session.loadDatabases() } }
-                }
-                Section {
-                    Button("Disconnect", systemImage: "eject") { session.disconnect() }
-                }
+            Button {
+                showMenu()
             } label: {
                 label
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
             .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 6)  // same inset as the sidebar's row highlights
-            // Drawn over the menu: inside its label the trailing chevron gets clipped away.
-            .overlay(alignment: .trailing) {
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                    .padding(.trailing, 14)
-                    .allowsHitTesting(false)
-            }
+            .padding(.horizontal, 6)
             .frame(height: 36)
         }
         .background(.bar)
@@ -72,16 +42,78 @@ struct ConnectionFooter: View {
                 .font(.system(size: 13))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 24)  // room for the chevron drawn over the menu
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         }
         .padding(.leading, 12)
-        .padding(.trailing, 8)
+        .padding(.trailing, 10)
         .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
             .fill(isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))
         .contentShape(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous))
         .help("\(session.config.user)@\(session.config.host) · \(session.connection?.serverVersion ?? "")")
     }
+
+    /// An AppKit menu: a SwiftUI Menu imposes its own label insets, which broke the alignment
+    /// with the rows above.
+    private func showMenu() {
+        let menu = NSMenu()
+        let actions = MenuActions(session: session,
+                                  newDatabase: { showsNewDatabase = true },
+                                  manage: { showsManager = true })
+
+        menu.addItem(withTitle: "Databases", action: nil, keyEquivalent: "").isEnabled = false
+        for database in session.databases {
+            let item = NSMenuItem(title: database.name, action: #selector(MenuActions.switchTo(_:)), keyEquivalent: "")
+            item.target = actions
+            item.representedObject = database.name
+            item.state = database.name == session.config.database ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        for (title, selector) in [("New Database…", #selector(MenuActions.newDatabase(_:))),
+                                  ("Manage Databases…", #selector(MenuActions.manageDatabases(_:))),
+                                  ("Reload List", #selector(MenuActions.reload(_:)))] {
+            let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+            item.target = actions
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let disconnect = NSMenuItem(title: "Disconnect", action: #selector(MenuActions.disconnect(_:)), keyEquivalent: "")
+        disconnect.target = actions
+        menu.addItem(disconnect)
+
+        menuActions = actions  // keep the targets alive while the menu is open
+        if let event = NSApp.currentEvent, let view = event.window?.contentView {
+            menu.popUp(positioning: nil, at: view.convert(event.locationInWindow, from: nil), in: view)
+        }
+    }
+}
+
+/// Targets for the AppKit menu items.
+@MainActor
+private final class MenuActions: NSObject {
+    let session: SessionModel
+    let newDatabaseHandler: () -> Void
+    let manageHandler: () -> Void
+
+    init(session: SessionModel, newDatabase: @escaping () -> Void, manage: @escaping () -> Void) {
+        self.session = session
+        newDatabaseHandler = newDatabase
+        manageHandler = manage
+    }
+
+    @objc func switchTo(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        Task { await session.switchDatabase(to: name) }
+    }
+
+    @objc func newDatabase(_ sender: Any?) { newDatabaseHandler() }
+    @objc func manageDatabases(_ sender: Any?) { manageHandler() }
+    @objc func reload(_ sender: Any?) { Task { await session.loadDatabases() } }
+    @objc func disconnect(_ sender: Any?) { session.disconnect() }
 }
 
 private struct NewDatabaseSheet: View {

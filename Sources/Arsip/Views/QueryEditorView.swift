@@ -35,11 +35,13 @@ struct QueryEditorView: View {
                         onSelectionChange: { model.updateSelection(range: $0) },
                         onRun: { Task { await model.runCurrent() } }
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     runControl
                         .padding(12)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(minHeight: 120, idealHeight: 260)
+            .frame(minHeight: 160, idealHeight: 280)
 
             resultsPane
                 .frame(minHeight: 140)
