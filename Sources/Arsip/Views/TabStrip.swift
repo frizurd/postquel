@@ -149,14 +149,18 @@ private struct TabButton: View {
             .opacity(isHovered || isActive ? 1 : 0)
             .help("Close tab (⌘W)")
         }
-        .font(.callout)
+        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular))
         .padding(.leading, 10)
         .padding(.trailing, 5)
         .frame(minWidth: 120, maxWidth: 220)
         .frame(height: 26)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
                 .fill(isActive ? AnyShapeStyle(.quaternary) : isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
+                .strokeBorder(isActive ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Color.clear))
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: select)

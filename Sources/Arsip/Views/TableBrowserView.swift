@@ -83,8 +83,8 @@ struct TableBrowserView: View {
         .font(.callout)
         .controlSize(.small)
         .disabled(model.isSaving)
-        .padding(.horizontal, 10)
-        .frame(height: 32)
+        .padding(.horizontal, 12)
+        .frame(height: Theme.barHeight)
         .background(Color.red.opacity(0.08))
     }
 
@@ -98,8 +98,8 @@ struct TableBrowserView: View {
                 .buttonStyle(.link)
         }
         .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(height: 28)
+        .padding(.horizontal, 12)
+        .frame(height: Theme.barHeight)
         .background(.bar)
     }
 
@@ -144,10 +144,7 @@ struct TableBrowserView: View {
             }
             .fixedSize()
         }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .frame(height: 30)
+        .statusBar()
     }
 
     private func rangeDescription(_ result: PGResult) -> String {

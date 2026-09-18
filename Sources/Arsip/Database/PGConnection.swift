@@ -100,6 +100,7 @@ final class PGConnection: @unchecked Sendable {
             ("application_name", applicationName),
             ("client_encoding", "UTF8"),
             ("connect_timeout", "10"),
+            ("sslmode", config.useSSL ? "require" : "prefer"),
         ]
         if !config.password.isEmpty { params.append(("password", config.password)) }
 

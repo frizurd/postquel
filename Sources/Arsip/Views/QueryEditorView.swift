@@ -73,8 +73,8 @@ struct QueryEditorView: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 10)
-        .frame(height: 34)
+        .padding(.horizontal, 12)
+        .frame(height: 36)
     }
 
     /// "Statement 2 of 3" while there's more than one.
@@ -163,10 +163,7 @@ struct QueryEditorView: View {
                 Text(formatDuration(duration)).monospacedDigit()
             }
         }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .frame(height: 26)
+        .statusBar()
     }
 }
 

@@ -35,13 +35,14 @@ struct ResultsGrid: NSViewRepresentable {
         let coordinator = context.coordinator
         let table = GridTableView()
         table.style = .plain
-        table.usesAlternatingRowBackgroundColors = true
-        table.gridStyleMask = [.solidVerticalGridLineMask]
+        table.usesAlternatingRowBackgroundColors = false
+        table.gridStyleMask = [.solidVerticalGridLineMask, .solidHorizontalGridLineMask]
+        table.gridColor = Theme.separator
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.allowsMultipleSelection = true
         table.allowsColumnReordering = true
         table.allowsColumnSelection = false
-        table.rowHeight = 26
+        table.rowHeight = Theme.gridRowHeight
         table.intercellSpacing = NSSize(width: 1, height: 0)
         table.dataSource = coordinator
         table.delegate = coordinator
@@ -134,6 +135,8 @@ struct ResultsGrid: NSViewRepresentable {
             for (index, column) in result.columns.enumerated() {
                 let tableColumn = NSTableColumn(identifier: .init(String(index)))
                 tableColumn.title = column.name
+                tableColumn.headerCell.font = .systemFont(ofSize: 11, weight: .semibold)
+                tableColumn.headerCell.textColor = .secondaryLabelColor
                 tableColumn.headerToolTip = "\(column.name) · \(column.typeName)"
                 tableColumn.minWidth = 40
                 tableColumn.maxWidth = 2000
@@ -427,12 +430,17 @@ final class MarkedRowView: NSTableRowView {
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
-        guard isMarked else {
-            super.drawSelection(in: dirtyRect)
-            return
+        guard selectionHighlightStyle != .none else { return }
+        let rect = bounds.insetBy(dx: 2, dy: 1)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        if isMarked {
+            NSColor.systemRed.withAlphaComponent(0.4).setFill()
+        } else if isEmphasized {
+            NSColor.controlAccentColor.withAlphaComponent(0.28).setFill()
+        } else {
+            NSColor.unemphasizedSelectedContentBackgroundColor.setFill()
         }
-        NSColor.systemRed.withAlphaComponent(0.4).setFill()
-        dirtyRect.fill()
+        path.fill()
     }
 }
 

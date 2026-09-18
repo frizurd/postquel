@@ -9,6 +9,9 @@ struct ConnectionConfig: Codable, Equatable {
     /// Only what was typed this session; saved passwords live in the Keychain.
     var password = ""
     var rememberPassword = true
+    var useSSL = false
+    /// Keychain and saved-tab key. Set from a saved connection so tunnels don't change it.
+    var accountKey: String?
 
     private enum CodingKeys: String, CodingKey { case host, port, user, database, rememberPassword }
 
@@ -24,7 +27,7 @@ struct ConnectionConfig: Codable, Equatable {
     }
 
     /// Identifies a server + login + database, for the Keychain and saved workspaces.
-    var account: String { "\(user)@\(host):\(port)/\(database)" }
+    var account: String { accountKey ?? "\(user)@\(host):\(port)/\(database)" }
 
     private static let defaultsKey = "lastConnection"
 
@@ -142,11 +145,15 @@ struct DatabaseInfo: Identifiable, Hashable {
 @MainActor @Observable
 final class SessionModel {
     private static let reconnectKey = "reconnectOnLaunch"
+    private static let lastConnectionKey = "lastConnectionID"
     /// Only the first window of a launch reconnects automatically.
     private static var didAttemptLaunchReconnect = false
 
     var config = ConnectionConfig.loadLast()
     private(set) var connection: PGConnection?
+    /// The saved entry this session came from, and its tunnel while connected.
+    private(set) var savedConnection: SavedConnection?
+    @ObservationIgnored private var tunnel: SSHTunnel?
     var isConnecting = false
     var connectError: String?
 
@@ -179,7 +186,50 @@ final class SessionModel {
     func reconnectOnLaunchIfNeeded() async {
         guard !Self.didAttemptLaunchReconnect else { return }
         Self.didAttemptLaunchReconnect = true
-        if UserDefaults.standard.bool(forKey: Self.reconnectKey) { await connect() }
+        guard UserDefaults.standard.bool(forKey: Self.reconnectKey) else { return }
+        // Reopen through the saved entry, so an SSH tunnel is set up again.
+        if let id = UserDefaults.standard.string(forKey: Self.lastConnectionKey).flatMap(UUID.init(uuidString:)),
+           let saved = ConnectionStore.load().first(where: { $0.id == id }) {
+            await connect(saved, database: config.database)
+        } else {
+            await connect()
+        }
+    }
+
+    /// Connects through a saved entry, opening an SSH tunnel first when it has one.
+    func connect(_ saved: SavedConnection, database: String? = nil) async {
+        savedConnection = saved
+        isConnecting = true
+        connectError = nil
+
+        var attempt = ConnectionConfig()
+        attempt.host = saved.host
+        attempt.port = saved.port
+        attempt.user = saved.user
+        attempt.database = database ?? saved.database
+        attempt.rememberPassword = saved.rememberPassword
+        attempt.useSSL = saved.useSSL
+        attempt.accountKey = saved.accountKey(database: attempt.database)
+        attempt.password = config.password  // whatever was typed on the connect screen
+
+        if saved.ssh.isEnabled {
+            tunnel?.close()
+            do {
+                let tunnel = try await SSHTunnel.open(saved.ssh, toHost: saved.host, port: saved.port)
+                self.tunnel = tunnel
+                attempt.host = "127.0.0.1"
+                attempt.port = tunnel.localPort
+            } catch {
+                connectError = "SSH tunnel: \(error.localizedDescription)"
+                isConnecting = false
+                return
+            }
+        }
+
+        config = attempt
+        isConnecting = false
+        UserDefaults.standard.set(saved.id.uuidString, forKey: Self.lastConnectionKey)
+        await connect()
     }
 
     func connect() async {
@@ -226,10 +276,10 @@ final class SessionModel {
     func switchDatabase(to name: String) async {
         guard name != config.database, var attempt = activeConfig else { return }
         saveWorkspace()
-        teardown()
+        teardown()  // the SSH tunnel stays open; only the database changes
         attempt.database = name
-        config.database = name
-        config.password = attempt.password  // the new database has its own Keychain entry, if any
+        attempt.accountKey = savedConnection?.accountKey(database: name)
+        config = attempt
         await connect()
     }
 
@@ -287,6 +337,9 @@ final class SessionModel {
     }
 
     func disconnect() {
+        tunnel?.close()
+        tunnel = nil
+        savedConnection = nil
         saveWorkspace()
         UserDefaults.standard.set(false, forKey: Self.reconnectKey)
         activeConfig = nil

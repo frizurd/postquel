@@ -68,7 +68,7 @@ struct BrowserView: View {
                     sidebarRow("SQL Query", symbol: "terminal").tag(SidebarItem.query)
                 }
                 ForEach(session.filteredSchemas) { group in
-                    Section(group.name) {
+                    Section {
                         ForEach(group.relations) { relation in
                             sidebarRow(relation.name, symbol: relation.kind.symbol)
                                 .tag(SidebarItem.relation(relation))
@@ -76,6 +76,8 @@ struct BrowserView: View {
                                     Button("Open in New Tab") { session.openTab(relation) }
                                 }
                         }
+                    } header: {
+                        Text(group.name).sectionLabel()
                     }
                 }
             }
@@ -160,10 +162,15 @@ struct BrowserView: View {
     private func sidebarRow(_ title: String, symbol: String) -> some View {
         HStack(spacing: 9) {
             Image(systemName: symbol)
+                .font(.system(size: 12))
                 .foregroundStyle(.tint)
                 .frame(width: 17, alignment: .center)
-            Text(title).lineLimit(1).truncationMode(.middle)
+            Text(title)
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
+        .padding(.vertical, 2)
     }
 
     /// Only the active tab is rendered; its model keeps loaded rows and editor text across switches.
