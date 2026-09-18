@@ -163,7 +163,6 @@ struct QueryEditorView: View {
                 }
             } label: {
                 Label(model.isRunning ? "Cancel" : "Run", systemImage: model.isRunning ? "stop.fill" : "play.fill")
-                    .frame(width: 58)
             }
             .buttonStyle(SoftButtonStyle(prominent: !model.isRunning))
             .help(model.isRunning ? "Cancel the running query" : "Run the statement at the cursor (⌘↩)")

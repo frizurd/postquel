@@ -233,48 +233,55 @@ final class LineNumberRuler: NSRulerView {
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView = clientView as? NSTextView,
               let layoutManager = textView.layoutManager,
-              let container = textView.textContainer,
-              let clipView = scrollView?.contentView
+              let container = textView.textContainer
         else { return }
 
         let text = textView.string as NSString
-        let visible = clipView.bounds
-        guard text.length > 0 else {
-            // Empty editor: just the first line, at the top.
-            draw(line: 1, at: textView.textContainerInset.height - visible.minY, isCurrent: true,
-                 height: layoutManager.defaultLineHeight(for: textView.font ?? SQLHighlighter.font))
-            return
-        }
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: container)
-        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let inset = textView.textContainerInset.height
         let cursorLine = lineNumber(at: textView.selectedRange().location, in: text)
 
-        var paragraphStart = 0, paragraphEnd = 0
-        text.getParagraphStart(&paragraphStart, end: &paragraphEnd, contentsEnd: nil,
-                               for: NSRange(location: charRange.location, length: 0))
-        var line = lineNumber(at: paragraphStart, in: text)
-        var index = paragraphStart
+        /// Line fragment positions are in the text view; the ruler scrolls with it.
+        func rulerY(_ fragmentMinY: CGFloat) -> CGFloat {
+            convert(NSPoint(x: 0, y: fragmentMinY + inset), from: textView).y
+        }
 
-        while index <= charRange.upperBound, index <= text.length {
-            let fragment: NSRect
-            if index == text.length {
-                // The empty line after a trailing newline has no glyphs of its own.
-                guard text.character(at: text.length - 1) == 0x0A else { break }
-                fragment = layoutManager.extraLineFragmentRect
-            } else {
-                let glyphIndex = layoutManager.glyphIndexForCharacter(at: index)
-                fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil,
+        let lineHeight = layoutManager.defaultLineHeight(for: textView.font ?? SQLHighlighter.font)
+        guard text.length > 0 else {
+            draw(line: 1, at: rulerY(0), isCurrent: true, height: lineHeight)
+            return
+        }
+
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: container)
+        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+
+        var index = paragraphStart(of: charRange.location, in: text)
+        var line = lineNumber(at: index, in: text)
+        while index < text.length, index <= charRange.upperBound {
+            let glyphIndex = layoutManager.glyphIndexForCharacter(at: index)
+            let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil,
                                                           withoutAdditionalLayout: false)
-            }
-            let y = fragment.minY + textView.textContainerInset.height - visible.minY
-            draw(line: line, at: y, isCurrent: line == cursorLine, height: fragment.height)
+            draw(line: line, at: rulerY(fragment.minY), isCurrent: line == cursorLine, height: fragment.height)
 
-            guard index < text.length else { break }
+            var paragraphEnd = 0
             text.getParagraphStart(nil, end: &paragraphEnd, contentsEnd: nil, for: NSRange(location: index, length: 0))
-            if paragraphEnd == index { break }  // no progress: stop rather than spin
+            guard paragraphEnd > index else { break }
             index = paragraphEnd
             line += 1
         }
+
+        // A trailing newline leaves one more (empty) line with no glyphs of its own.
+        if text.character(at: text.length - 1) == 0x0A, charRange.upperBound >= text.length {
+            let fragment = layoutManager.extraLineFragmentRect
+            draw(line: line, at: rulerY(fragment.minY), isCurrent: line == cursorLine,
+                 height: fragment.height > 0 ? fragment.height : lineHeight)
+        }
+    }
+
+    private func paragraphStart(of location: Int, in text: NSString) -> Int {
+        var start = 0
+        text.getParagraphStart(&start, end: nil, contentsEnd: nil,
+                               for: NSRange(location: min(location, text.length), length: 0))
+        return start
     }
 
     private func draw(line: Int, at y: CGFloat, isCurrent: Bool, height: CGFloat) {
@@ -294,6 +301,6 @@ final class LineNumberRuler: NSRulerView {
         var line = 1
         text.enumerateSubstrings(in: NSRange(location: 0, length: min(location, text.length)),
                                  options: [.byLines, .substringNotRequired]) { _, _, _, _ in line += 1 }
-        return min(line, max(1, line))
+        return line
     }
 }
