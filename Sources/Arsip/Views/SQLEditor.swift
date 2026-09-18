@@ -51,6 +51,13 @@ struct SQLEditor: NSViewRepresentable {
         textView.string = text
 
         scroll.documentView = textView
+
+        let ruler = LineNumberRuler(textView: textView)
+        scroll.verticalRulerView = ruler
+        scroll.hasVerticalRuler = true
+        scroll.rulersVisible = true
+        textView.lineNumbers = ruler
+
         return scroll
     }
 
@@ -97,6 +104,17 @@ struct SQLEditor: NSViewRepresentable {
 
 final class SQLTextView: NSTextView {
     var onRun: (() -> Void)?
+    weak var lineNumbers: LineNumberRuler?
+
+    override func didChangeText() {
+        super.didChangeText()
+        lineNumbers?.needsDisplay = true
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        lineNumbers?.needsDisplay = true
+    }
     /// Re-applies colors; the coordinator sets this up.
     var rehighlight: (() -> Void)?
 
@@ -188,5 +206,94 @@ enum SQLHighlighter {
         where range.length > 0 {
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
         }
+    }
+}
+
+/// Line numbers down the left of the editor, like an IDE. The line the cursor is on stands out.
+final class LineNumberRuler: NSRulerView {
+    private static let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+
+    init(textView: NSTextView) {
+        super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
+        clientView = textView
+        ruleThickness = 34
+        // Redraw while scrolling.
+        if let clipView = textView.enclosingScrollView?.contentView {
+            clipView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.needsDisplay = true }
+            }
+        }
+    }
+
+    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        guard let textView = clientView as? NSTextView,
+              let layoutManager = textView.layoutManager,
+              let container = textView.textContainer,
+              let clipView = scrollView?.contentView
+        else { return }
+
+        let text = textView.string as NSString
+        let visible = clipView.bounds
+        guard text.length > 0 else {
+            // Empty editor: just the first line, at the top.
+            draw(line: 1, at: textView.textContainerInset.height - visible.minY, isCurrent: true,
+                 height: layoutManager.defaultLineHeight(for: textView.font ?? SQLHighlighter.font))
+            return
+        }
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: container)
+        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let cursorLine = lineNumber(at: textView.selectedRange().location, in: text)
+
+        var paragraphStart = 0, paragraphEnd = 0
+        text.getParagraphStart(&paragraphStart, end: &paragraphEnd, contentsEnd: nil,
+                               for: NSRange(location: charRange.location, length: 0))
+        var line = lineNumber(at: paragraphStart, in: text)
+        var index = paragraphStart
+
+        while index <= charRange.upperBound, index <= text.length {
+            let fragment: NSRect
+            if index == text.length {
+                // The empty line after a trailing newline has no glyphs of its own.
+                guard text.character(at: text.length - 1) == 0x0A else { break }
+                fragment = layoutManager.extraLineFragmentRect
+            } else {
+                let glyphIndex = layoutManager.glyphIndexForCharacter(at: index)
+                fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil,
+                                                          withoutAdditionalLayout: false)
+            }
+            let y = fragment.minY + textView.textContainerInset.height - visible.minY
+            draw(line: line, at: y, isCurrent: line == cursorLine, height: fragment.height)
+
+            guard index < text.length else { break }
+            text.getParagraphStart(nil, end: &paragraphEnd, contentsEnd: nil, for: NSRange(location: index, length: 0))
+            if paragraphEnd == index { break }  // no progress: stop rather than spin
+            index = paragraphEnd
+            line += 1
+        }
+    }
+
+    private func draw(line: Int, at y: CGFloat, isCurrent: Bool, height: CGFloat) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Self.font,
+            .foregroundColor: isCurrent ? NSColor.labelColor : NSColor.tertiaryLabelColor,
+        ]
+        let label = "\(line)" as NSString
+        let size = label.size(withAttributes: attributes)
+        label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: y + (height - size.height) / 2),
+                   withAttributes: attributes)
+    }
+
+    /// 1-based line number of a character offset.
+    private func lineNumber(at location: Int, in text: NSString) -> Int {
+        guard location > 0, text.length > 0 else { return 1 }
+        var line = 1
+        text.enumerateSubstrings(in: NSRange(location: 0, length: min(location, text.length)),
+                                 options: [.byLines, .substringNotRequired]) { _, _, _, _ in line += 1 }
+        return min(line, max(1, line))
     }
 }

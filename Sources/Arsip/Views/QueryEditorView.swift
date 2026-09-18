@@ -155,9 +155,6 @@ struct QueryEditorView: View {
 
     private var runControl: some View {
         HStack(spacing: 8) {
-            if model.isRunning {
-                ProgressView().controlSize(.small)
-            }
             Button {
                 if model.isRunning {
                     model.cancel()
