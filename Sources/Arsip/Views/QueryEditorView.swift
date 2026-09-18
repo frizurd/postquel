@@ -82,7 +82,9 @@ struct QueryEditorView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity)
         .frame(height: 36)
+        .background(.bar)
     }
 
     /// "Statement 2 of 3" while there's more than one.
