@@ -230,6 +230,14 @@ final class LineNumberRuler: NSRulerView {
 
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Drawn in full: the default ruler paints a border down its edge, which ran past the
+    /// editor and into the bar above it.
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.textBackgroundColor.setFill()
+        dirtyRect.fill()
+        drawHashMarksAndLabels(in: dirtyRect)
+    }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView = clientView as? NSTextView,
               let layoutManager = textView.layoutManager,
