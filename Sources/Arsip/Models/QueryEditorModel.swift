@@ -21,6 +21,8 @@ final class QueryEditorModel {
     private(set) var duration: TimeInterval?
     /// Note about what ⌘↩ actually ran, e.g. when several statements were selected.
     private(set) var lastRunNote: String?
+    /// The statement that produced the current results, for the "why is this slow?" prompt.
+    private(set) var lastRunSQL: String?
     var selectedResultIndex = 0 {
         didSet { selectedCell = nil }
     }
@@ -77,6 +79,7 @@ final class QueryEditorModel {
         UserDefaults.standard.set(text, forKey: Self.textKey)
 
         isRunning = true
+        lastRunSQL = sql
         defer { isRunning = false }
         let outcome = await connection.execute(sql)
         selectedCell = nil

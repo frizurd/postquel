@@ -5,6 +5,8 @@ struct QueryEditorView: View {
     var generator: SQLGenerator?
     var tables: [RelationRef] = []
     var onShowInspector: () -> Void
+    /// Hands a prompt to the assistant panel and opens it.
+    var onAskAssistant: ((String) -> Void)? = nil
     @State private var showsPrompt = false
 
     var body: some View {
@@ -147,6 +149,42 @@ struct QueryEditorView: View {
         }
     }
 
+    @ViewBuilder
+    private func speedBadge(_ duration: TimeInterval) -> some View {
+        let speed = QuerySpeed(duration: duration, failed: model.error != nil)
+        HStack(spacing: 6) {
+            if speed == .slow, let sql = model.lastRunSQL, onAskAssistant != nil {
+                Button {
+                    onAskAssistant?(Self.slowQueryPrompt(sql: sql, duration: duration))
+                } label: {
+                    Label("Analyze", systemImage: "sparkles")
+                }
+                .buttonStyle(SoftButtonStyle())
+                .controlSize(.small)
+                .help("Ask Claude why this is slow")
+            }
+            Label {
+                Text(formatDuration(duration)).monospacedDigit()
+            } icon: {
+                Image(systemName: speed.symbol)
+            }
+            .foregroundStyle(speed.color)
+            .help(speed.explanation)
+        }
+    }
+
+    private static func slowQueryPrompt(sql: String, duration: TimeInterval) -> String {
+        """
+        This query took \(formatDuration(duration)) in Arsip:
+
+        ```sql
+        \(sql)
+        ```
+
+        Run explain_query with analyze=true, say in one or two sentences where the time goes,         and suggest the specific fixes worth making (indexes with the exact CREATE INDEX, or a         rewrite). Check the table sizes and existing indexes before suggesting one.
+        """
+    }
+
     private var statusBar: some View {
         HStack(spacing: 8) {
             if let error = model.error, !model.results.isEmpty {
@@ -160,7 +198,7 @@ struct QueryEditorView: View {
             }
             Spacer()
             if let duration = model.duration {
-                Text(formatDuration(duration)).monospacedDigit()
+                speedBadge(duration)
             }
         }
         .statusBar()

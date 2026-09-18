@@ -193,8 +193,17 @@ struct BrowserView: View {
     private func tabView(_ tab: WorkspaceTab) -> some View {
         switch tab.content {
         case .query(let editor):
-            QueryEditorView(model: editor, generator: session.sqlGenerator, tables: session.allRelations,
-                            onShowInspector: showValueInspector)
+            QueryEditorView(
+                model: editor,
+                generator: session.sqlGenerator,
+                tables: session.allRelations,
+                onShowInspector: showValueInspector,
+                onAskAssistant: { prompt in
+                    inspectorMode = .assistant
+                    showsInspector = true
+                    session.assistant?.send(prompt)
+                }
+            )
         case .table(let browser):
             TableBrowserView(
                 model: browser,
