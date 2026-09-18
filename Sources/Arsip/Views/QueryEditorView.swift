@@ -15,8 +15,6 @@ struct QueryEditorView: View {
     var body: some View {
         VSplitView {
             VStack(spacing: 0) {
-                editorBar
-                Divider()
                 if let generator, showsPrompt {
                     SQLPromptBar(
                         generator: generator,
@@ -40,8 +38,10 @@ struct QueryEditorView: View {
                         .padding(12)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             }
             .frame(minHeight: 160, idealHeight: 280)
+
 
             resultsPane
                 .frame(minHeight: 140)
@@ -53,38 +53,6 @@ struct QueryEditorView: View {
             model.refreshActiveStatement()
             model.onTextChange?()
         }
-    }
-
-    private var editorBar: some View {
-        HStack(spacing: 8) {
-            if generator != nil {
-                Button { showsPrompt.toggle() } label: {
-                    Label("Ask AI", systemImage: "sparkles")
-                }
-                .keyboardShortcut("l")
-                .help("Describe the query you want (⌘L)")
-            }
-            if let name = model.name {
-                Label(name, systemImage: "text.alignleft")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else if onSaveQuery != nil {
-                Button { showsSaveQuery = true } label: {
-                    Label("Save Query", systemImage: "square.and.arrow.down")
-                }
-                .disabled(model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("Keep this query in the sidebar for this database")
-            }
-            Spacer()
-            Text(statementLabel.map { "⌘↩ runs \($0.lowercased())" } ?? "⌘↩ runs the statement at the cursor")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity)
-        .frame(height: 36)
-        .background(.bar)
     }
 
     /// "Statement 2 of 3" while there's more than one.
@@ -157,8 +125,35 @@ struct QueryEditorView: View {
         }
     }
 
+    /// Everything the editor needs, floating over its bottom-right corner.
     private var runControl: some View {
         HStack(spacing: 8) {
+            if let label = statementLabel {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if generator != nil {
+                Button { showsPrompt.toggle() } label: {
+                    Label("Ask AI", systemImage: "sparkles")
+                }
+                .buttonStyle(SoftButtonStyle())
+                .keyboardShortcut("l")
+                .help("Describe the query you want (⌘L)")
+            }
+            if let name = model.name {
+                Label(name, systemImage: "text.alignleft")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else if onSaveQuery != nil {
+                Button { showsSaveQuery = true } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(SoftButtonStyle())
+                .disabled(model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Keep this query in the sidebar for this database")
+            }
             Button {
                 if model.isRunning {
                     model.cancel()

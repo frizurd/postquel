@@ -38,6 +38,10 @@ struct SQLEditor: NSViewRepresentable {
         textView.smartInsertDeleteEnabled = false
         textView.textContainerInset = NSSize(width: 6, height: 8)
         textView.font = SQLHighlighter.font
+        textView.drawsBackground = true
+        textView.backgroundColor = .textBackgroundColor
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .labelColor
         textView.typingAttributes = [.font: SQLHighlighter.font, .foregroundColor: NSColor.labelColor]
 
         textView.delegate = context.coordinator
@@ -49,6 +53,7 @@ struct SQLEditor: NSViewRepresentable {
             SQLHighlighter.highlight(storage, active: coordinator?.activeRange)
         }
         textView.string = text
+        if let storage = textView.textStorage { SQLHighlighter.highlight(storage, active: activeRange) }
 
         scroll.documentView = textView
 
@@ -68,7 +73,13 @@ struct SQLEditor: NSViewRepresentable {
             context.coordinator.activeRange = activeRange
             if let storage = textView.textStorage { SQLHighlighter.highlight(storage, active: activeRange) }
         }
-        guard textView.string != text else { return }
+        guard textView.string != text else {
+            if let storage = textView.textStorage, storage.length > 0 {
+                // Cheap insurance: colors can be lost if something replaced the storage's attributes.
+                SQLHighlighter.highlight(storage, active: activeRange)
+            }
+            return
+        }
         // Replace through the text storage so generated SQL can be undone with ⌘Z.
         let whole = NSRange(location: 0, length: (textView.string as NSString).length)
         if textView.shouldChangeText(in: whole, replacementString: text) {
