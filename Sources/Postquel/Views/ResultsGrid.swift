@@ -149,13 +149,19 @@ struct ResultsGrid: NSViewRepresentable {
             table.scroll(.zero)
         }
 
+        /// Fits the header and the first 100 values, measured in the fonts they're drawn with: counting
+        /// characters cut off wide digits like `5219783.42`.
         private func estimatedWidth(column: Int) -> CGFloat {
             guard let result else { return 120 }
-            var longest = result.columns[column].name.count + 2
+            let header = (result.columns[column].name as NSString)
+                .size(withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold)]).width + 24
+            var widest = header
             for row in 0..<min(result.rowCount, 100) {
-                longest = max(longest, min(result.value(row: row, column: column)?.count ?? 4, 60))
+                let value = result.value(row: row, column: column) ?? "NULL"
+                widest = max(widest, GridCell.textWidth(String(value.prefix(60))) + 26)  // cell margins + the field's own padding
+                if widest >= 420 { break }
             }
-            return min(max(CGFloat(longest) * 7 + 22, 60), 420)
+            return min(max(ceil(widest), 60), 420)
         }
 
         private func syncSortIndicator(_ table: NSTableView, sort: GridSort?) {
@@ -514,6 +520,11 @@ final class GridCell: NSTableCellView {
         let trailing: CGFloat = showsLink ? 6 + 14 + 3 : 8
         field.frame = NSRect(x: 8, y: y, width: max(bounds.width - 8 - trailing, 0), height: height)
         linkButton?.frame = NSRect(x: bounds.width - 6 - 14, y: floor((bounds.height - 14) / 2), width: 14, height: 14)
+    }
+
+    /// Width of a value in the cell font, for sizing columns.
+    static func textWidth(_ text: String) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: font]).width
     }
 
     func show(_ value: String?, alignRight: Bool, showsLink: Bool, isInspected: Bool) {

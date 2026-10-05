@@ -1,6 +1,27 @@
-# Postquel
+<p align="center">
+  <img src="docs/icon.png" width="112" alt="Postquel icon">
+</p>
 
-A native macOS PostgreSQL client (SwiftUI + AppKit + libpq). Prototype.
+<h1 align="center">Postquel</h1>
+
+<p align="center">
+  A fast, native PostgreSQL client for macOS, with an AI assistant that uses the Claude Code, Codex or Cursor account already on your Mac.
+</p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot-light.png" alt="Postquel showing a SQL query with its results, and the assistant answering which customers spent the most">
+</picture>
+
+## Features
+
+- **Tables** — browse and edit rows, follow foreign keys, and switch between Content, Structure and DDL. Structure edits columns, indexes, constraints and notes, then saves them in one transaction after an SQL preview.
+- **Queries** — a SQL editor with highlighting and line numbers, results you can sort by clicking a header, and query timing.
+- **Assistant** — ask about your data in plain language, or describe a query and get SQL. It reads the real schema and runs read-only queries; changes are only ever proposed, for you to dry-run and apply.
+- **Bring your own AI** — uses Claude Code, Codex or Cursor Agent, whichever is installed and signed in. Pick any of their models. No API keys are stored in Postquel.
+- **Native** — SwiftUI and AppKit on libpq, with Liquid Glass on macOS 26. SSH tunnels and Keychain passwords included.
+
+Postquel is a prototype and a work in progress.
 
 ## Run
 
@@ -16,6 +37,8 @@ Demo data: `createdb postquel_demo && psql postquel_demo -f scripts/seed-demo.sq
 
 ## Layout
 
+- `Resources/AppIcon.png` – silver icon on dark graphite; the app build generates all macOS icon sizes
+- `Resources/Logo.png` – silver mark with a transparent background
 - `Sources/CLibPQ` – module map for libpq
 - `Sources/Postquel/Database` – `PGConnection` (libpq on a serial queue, text results, cancel)
 - `Sources/Postquel/Models` – session, table browser, query editor state

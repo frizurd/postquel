@@ -16,15 +16,19 @@ CREATE TABLE customers (
 );
 
 INSERT INTO customers (name, email, country, is_active, balance, metadata, notes, created_at)
-SELECT 'Customer ' || g,
-       CASE WHEN g % 13 = 0 THEN NULL ELSE 'user' || g || '@example.com' END,
+SELECT first || ' ' || last,
+       CASE WHEN g % 13 = 0 THEN NULL ELSE lower(replace(first || '.' || last, ' ', '')) || g || '@example.com' END,
        (ARRAY['ID', 'NL', 'US', 'DE', 'JP', 'SG'])[1 + g % 6],
        g % 7 <> 0,
        round((random() * 10000)::numeric, 2),
        jsonb_build_object('tier', (ARRAY['free', 'pro', 'team'])[1 + g % 3], 'score', g % 100),
        CASE WHEN g % 50 = 0 THEN E'multi-line\nnote for ' || g END,
        now() - (g || ' minutes')::interval
-FROM generate_series(1, 100000) g;
+FROM generate_series(1, 100000) g,
+     LATERAL (SELECT (ARRAY['Ava', 'Budi', 'Chen', 'Daan', 'Emma', 'Farah', 'Hiro', 'Iris', 'Jonas', 'Kai',
+                             'Lena', 'Maya', 'Noah', 'Olivia', 'Putri', 'Ravi', 'Sofia', 'Tom', 'Yuki', 'Zara'])[1 + g % 20] AS first,
+                     (ARRAY['Tan', 'de Vries', 'Smith', 'Müller', 'Sato', 'Santoso', 'Lim', 'Jansen', 'Garcia', 'Kim',
+                             'Wijaya', 'Brown', 'Nakamura', 'Schmidt', 'Lee', 'Bakker', 'Chen', 'Lopez', 'Hartono'])[1 + (g * 7) % 19] AS last) n;
 
 CREATE TABLE orders (
     id          bigserial PRIMARY KEY,
