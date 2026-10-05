@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Needed when launched as a bare SwiftPM executable (`swift run`).
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        AgentCLI.removeStaleWorkspaces()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

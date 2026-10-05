@@ -5,6 +5,7 @@ import Observation
 enum AgentKind: String, CaseIterable, Identifiable, Sendable {
     case claude
     case codex
+    case cursor
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum AgentKind: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claude: "Claude Code"
         case .codex: "Codex"
+        case .cursor: "Cursor Agent"
         }
     }
 
@@ -20,10 +22,17 @@ enum AgentKind: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claude: "Claude"
         case .codex: "Codex"
+        case .cursor: "Cursor"
         }
     }
 
-    var command: String { rawValue }
+    var command: String {
+        switch self {
+        case .claude: "claude"
+        case .codex: "codex"
+        case .cursor: "cursor-agent"
+        }
+    }
 
     var executableURL: URL? { AgentCLI.executableURL(for: self) }
 
@@ -48,6 +57,25 @@ enum AgentKind: String, CaseIterable, Identifiable, Sendable {
                     guard let slug = model["slug"] as? String else { return nil }
                     return AgentModel(agent: self, model: slug, name: model["display_name"] as? String ?? slug)
                 }
+        case .cursor:
+            // `cursor-agent models` prints "id - Name" lines; Default is Cursor's own Auto.
+            guard let executable = executableURL,
+                  let data = AgentCLI.output(of: executable, arguments: ["models"])
+            else { return fallback }
+            let ansi = try? NSRegularExpression(pattern: "\u{1B}\\[[0-9;]*m")
+            return fallback + String(decoding: data, as: UTF8.self).components(separatedBy: "\n").compactMap { line in
+                let range = NSRange(line.startIndex..., in: line)
+                let plain = ansi?.stringByReplacingMatches(in: line, range: range, withTemplate: "") ?? line
+                let parts = plain.components(separatedBy: " - ")
+                guard parts.count >= 2 else { return nil }
+                let slug = parts[0].trimmingCharacters(in: .whitespaces)
+                guard !slug.isEmpty, !slug.contains(" "), slug != "auto" else { return nil }
+                let name = parts.dropFirst().joined(separator: " - ")
+                    .replacingOccurrences(of: "(default)", with: "")
+                    .replacingOccurrences(of: "(current)", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                return AgentModel(agent: self, model: slug, name: name.isEmpty ? slug : name)
+            }
         }
     }
 }
@@ -121,11 +149,13 @@ final class AgentCatalog {
 enum AgentCLI {
     private static let claudeURL = locate("claude", extra: ["\(home)/.claude/local/claude"])
     private static let codexURL = locate("codex")
+    private static let cursorURL = locate("cursor-agent")
 
     static func executableURL(for agent: AgentKind) -> URL? {
         switch agent {
         case .claude: claudeURL
         case .codex: codexURL
+        case .cursor: cursorURL
         }
     }
 
@@ -174,6 +204,16 @@ enum AgentCLI {
         environment["PATH"] = (extra + [environment["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
         return environment
     }()
+
+    /// Removes Cursor workspaces left by earlier launches: a runner deletes its own when it goes away,
+    /// but quitting the app doesn't give it the chance. Call once at launch, before any run.
+    static func removeStaleWorkspaces() {
+        let directory = workingDirectory
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        for entry in entries where entry.hasPrefix("cursor-") {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(entry))
+        }
+    }
 
     /// An empty directory, so no project CLAUDE.md, AGENTS.md or settings get picked up.
     static var workingDirectory: URL {

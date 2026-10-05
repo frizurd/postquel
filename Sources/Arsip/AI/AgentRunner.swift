@@ -13,15 +13,22 @@ enum AgentEvent {
     case failed(String)
 }
 
-/// Runs an agent CLI (`claude -p` or `codex exec`) with Arsip's read-only MCP server attached.
-/// Used both by the chat panel (streaming) and by SQL generation (one structured answer).
+/// Runs an agent CLI (`claude -p`, `codex exec` or `cursor-agent -p`) with Arsip's read-only MCP
+/// server attached. Used both by the chat panel (streaming) and by SQL generation (one structured answer).
 @MainActor
 final class AgentRunner {
     private let config: ConnectionConfig
     private var process: Process?
+    /// Cursor ties a chat to its workspace folder, so each runner keeps one for its whole life:
+    /// follow-up turns resume there. It holds Arsip's rules and permissions, never the password.
+    private let cursorWorkspace = AgentCLI.workingDirectory.appendingPathComponent("cursor-\(UUID().uuidString)", isDirectory: true)
 
     init(config: ConnectionConfig) {
         self.config = config
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: cursorWorkspace)
     }
 
     var isRunning: Bool { process != nil }
@@ -105,11 +112,37 @@ final class AgentRunner {
             }
             guard last != nil || status == 0 else { return .failure(exitError(agent: agent, status: status, stderr: stderr)) }
             text = last
+        case .cursor:
+            // stream-json events; `result` has the whole reply, which was asked to end in a JSON object.
+            var result: [String: Any]?
+            for line in output.split(separator: 0x0A) {
+                if let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                   event["type"] as? String == "result" {
+                    result = event
+                }
+            }
+            guard let result else { return .failure(exitError(agent: agent, status: status, stderr: stderr)) }
+            if result["is_error"] as? Bool == true {
+                return .failure(PGError(result["result"] as? String ?? "\(agent.displayName) reported an error"))
+            }
+            text = (result["result"] as? String).flatMap(Self.lastJSONObject)
         }
         guard let text, let answer = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
             return .failure(PGError("\(agent.displayName) returned an unexpected answer"))
         }
         return .success(answer)
+    }
+
+    /// The outermost JSON object at the end of a reply that may have prose or code fences around it.
+    private static func lastJSONObject(in text: String) -> String? {
+        guard let end = text.lastIndex(of: "}") else { return nil }
+        var start = text.startIndex
+        while let open = text[start...end].firstIndex(of: "{") {
+            let candidate = String(text[open...end])
+            if (try? JSONSerialization.jsonObject(with: Data(candidate.utf8))) is [String: Any] { return candidate }
+            start = text.index(after: open)
+        }
+        return nil
     }
 
     private static func exitError(agent: AgentKind, status: Int32, stderr: String) -> PGError {
@@ -163,6 +196,11 @@ final class AgentRunner {
                 environment.merge(mcpEnvironment) { _, new in new }
                 process.arguments = try codexArguments(model: model, systemPrompt: systemPrompt, tools: tools,
                                                        resume: resume, schema: schemaURL)
+            case .cursor:
+                let mcpConfigURL = try prepareCursorWorkspace(systemPrompt: systemPrompt, tools: tools, jsonSchema: jsonSchema)
+                scratchFiles.append(mcpConfigURL)
+                process.currentDirectoryURL = cursorWorkspace
+                process.arguments = cursorArguments(model: model, resume: resume)
             }
         } catch {
             removeScratchFiles()
@@ -272,6 +310,49 @@ final class AgentRunner {
         return arguments + ["-"]  // prompt from stdin
     }
 
+    /// Cursor has no flags for instructions, tool limits or MCP servers; it reads them from the
+    /// workspace. Writes the rules and permissions, and returns the MCP config to delete after the run.
+    private func prepareCursorWorkspace(systemPrompt: String, tools: [String]?, jsonSchema: [String: Any]?) throws -> URL {
+        let cursorDirectory = cursorWorkspace.appendingPathComponent(".cursor", isDirectory: true)
+        let rulesDirectory = cursorDirectory.appendingPathComponent("rules", isDirectory: true)
+        try FileManager.default.createDirectory(at: rulesDirectory, withIntermediateDirectories: true)
+
+        var instructions = systemPrompt
+        if let jsonSchema {
+            // No structured output option: ask for the JSON and pick it out of the reply.
+            let schema = String(decoding: try JSONSerialization.data(withJSONObject: jsonSchema, options: [.sortedKeys]), as: UTF8.self)
+            instructions += "\n\nEnd your final reply with only a JSON object matching this JSON Schema, with no code fences:\n\(schema)"
+        }
+        try Data("---\nalwaysApply: true\n---\n\(instructions)\n".utf8)
+            .write(to: rulesDirectory.appendingPathComponent("arsip.mdc"))
+
+        // Only Arsip's database tools: no shell, no file access, no web.
+        let allowed = tools.map { $0.map { "Mcp(arsip:\($0))" } } ?? ["Mcp(arsip:*)"]
+        let permissions: [String: Any] = [
+            "permissions": ["allow": allowed, "deny": ["Shell(*)", "Read(**)", "Write(**)", "WebFetch(*)"]],
+        ]
+        try JSONSerialization.data(withJSONObject: permissions).write(to: cursorDirectory.appendingPathComponent("cli.json"))
+
+        let mcpConfigURL = cursorDirectory.appendingPathComponent("mcp.json")
+        try? FileManager.default.removeItem(at: mcpConfigURL)
+        try writeMCPConfig(to: mcpConfigURL)
+        return mcpConfigURL
+    }
+
+    private func cursorArguments(model: AgentModel, resume: String?) -> [String] {
+        var arguments = [
+            "-p",
+            "--output-format", "stream-json",
+            "--stream-partial-output",
+            "--approve-mcps",  // load Arsip's server without asking; calls still need the allow list above
+            "--trust",
+            "--workspace", cursorWorkspace.path,
+        ]
+        if let name = model.model { arguments += ["--model", name] }
+        if let resume { arguments += ["--resume", resume] }
+        return arguments
+    }
+
     private var mcpEnvironment: [String: String] {
         var environment = [
             MCPServer.EnvironmentKey.host: config.host,
@@ -331,6 +412,8 @@ final class AgentEventParser {
     /// Codex numbers items per turn (item_0, item_1…), so ids get a per-run prefix to stay unique.
     private let runPrefix = UUID().uuidString.prefix(8)
     private var startedTools: Set<String> = []
+    /// Cursor: text streamed for the current message, to recognise the full copy sent after it.
+    private var streamedText = ""
 
     init(agent: AgentKind) { self.agent = agent }
 
@@ -338,6 +421,7 @@ final class AgentEventParser {
         switch agent {
         case .claude: claudeEvents(from: event)
         case .codex: codexEvents(from: event)
+        case .cursor: cursorEvents(from: event)
         }
     }
 
@@ -424,6 +508,64 @@ final class AgentEventParser {
             default:
                 return []
             }
+
+        default:
+            return []
+        }
+    }
+
+    private func cursorEvents(from event: [String: Any]) -> [AgentEvent] {
+        switch event["type"] as? String {
+        case "system":
+            return (event["session_id"] as? String).map { [.session($0)] } ?? []
+
+        case "assistant":
+            // With --stream-partial-output each delta arrives on its own, then the whole message again,
+            // which would double the text. The repeat isn't reliably marked, so skip whatever exactly
+            // matches the text streamed since the last tool call.
+            let content = (event["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+            let text = content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
+            guard !text.isEmpty else { return [] }
+            if event["model_call_id"] != nil || text == streamedText {
+                streamedText = ""
+                return []
+            }
+            streamedText += text
+            return [.textDelta(text)]
+
+        case "tool_call":
+            streamedText = ""
+            // Only Arsip's tools are shown; Cursor's own lookups (getMcpTools…) are bookkeeping.
+            guard let id = event["call_id"] as? String,
+                  let call = (event["tool_call"] as? [String: Any])?["mcpToolCall"] as? [String: Any]
+            else { return [] }
+            let args = call["args"] as? [String: Any] ?? [:]
+            var events: [AgentEvent] = []
+            if startedTools.insert(id).inserted {
+                events.append(.toolUse(id: id, name: args["toolName"] as? String ?? "", input: args["args"] as? [String: Any] ?? [:]))
+            }
+            if event["subtype"] as? String == "completed" {
+                let result = call["result"] as? [String: Any] ?? [:]
+                if let success = result["success"] as? [String: Any] {
+                    let parts = success["content"] as? [[String: Any]] ?? []
+                    let text = parts.compactMap { ($0["text"] as? [String: Any])?["text"] as? String ?? $0["text"] as? String }
+                        .joined(separator: "\n")
+                    events.append(.toolResult(id: id, output: text, isError: success["isError"] as? Bool ?? false))
+                } else {
+                    let reason = (result["rejected"] as? [String: Any])?["reason"] as? String
+                        ?? Self.message(in: (result["error"] as? [String: Any])?["errorMessage"] ?? result["error"])
+                        ?? "The tool call didn't run"
+                    events.append(.toolResult(id: id, output: reason, isError: true))
+                }
+            }
+            return events
+
+        case "result":
+            var events: [AgentEvent] = (event["session_id"] as? String).map { [.session($0)] } ?? []
+            if event["is_error"] as? Bool == true {
+                events.append(.failed(event["result"] as? String ?? "\(agent.displayName) reported an error"))
+            }
+            return events
 
         default:
             return []

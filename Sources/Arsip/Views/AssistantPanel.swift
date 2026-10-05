@@ -66,12 +66,18 @@ struct AssistantPanel: View {
     private var modelMenu: some View {
         Menu {
             ForEach(catalog.installed) { agent in
-                Section(agent.displayName) {
-                    ForEach(catalog.models(for: agent)) { option in
-                        Toggle(option.name, isOn: Binding(
-                            get: { catalog.selection == option },
-                            set: { if $0 { catalog.selection = option } }
-                        ))
+                let models = catalog.models(for: agent)
+                // Short lists stay inline; long ones (Cursor offers hundreds) get a submenu.
+                if models.count > 16 {
+                    Section(agent.displayName) {
+                        modelToggle(models[0])
+                        Menu("All \(models.count - 1) Models") {
+                            ForEach(models.dropFirst()) { modelToggle($0) }
+                        }
+                    }
+                } else {
+                    Section(agent.displayName) {
+                        ForEach(models) { modelToggle($0) }
                     }
                 }
             }
@@ -87,6 +93,13 @@ struct AssistantPanel: View {
         .fixedSize()
         .disabled(!catalog.isLoaded)
         .help("Choose the agent and model. Changing agents starts a fresh session for the next message.")
+    }
+
+    private func modelToggle(_ option: AgentModel) -> some View {
+        Toggle(option.name, isOn: Binding(
+            get: { catalog.selection == option },
+            set: { if $0 { catalog.selection = option } }
+        ))
     }
 
     private var emptyState: some View {
@@ -127,10 +140,11 @@ struct AssistantPanel: View {
         ContentUnavailableView {
             Label("No Coding Agent Found", systemImage: "sparkles")
         } description: {
-            Text("Arsip uses your Claude Code or Codex subscription. Install one, run `claude` or `codex` once in Terminal to sign in, then relaunch Arsip.")
+            Text("Arsip uses your Claude Code, Codex or Cursor subscription. Install one, sign in once in Terminal (`claude`, `codex` or `cursor-agent login`), then relaunch Arsip.")
         } actions: {
             Link("Get Claude Code", destination: URL(string: "https://claude.com/claude-code")!)
             Link("Get Codex", destination: URL(string: "https://developers.openai.com/codex/cli")!)
+            Link("Get Cursor Agent", destination: URL(string: "https://cursor.com/cli")!)
         }
         .frame(maxHeight: .infinity)
     }

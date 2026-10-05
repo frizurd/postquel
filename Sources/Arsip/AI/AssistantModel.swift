@@ -6,7 +6,7 @@ enum AssistantAction {
     case openQuery(sql: String)
 }
 
-/// Chat with an agent (Claude Code, Codex) about the connected database. Each turn runs the agent
+/// Chat with an agent (Claude Code, Codex, Cursor) about the connected database. Each turn runs the agent
 /// CLI with Arsip's read-only MCP server; follow-up turns resume the same agent session.
 @MainActor @Observable
 final class AssistantModel {
