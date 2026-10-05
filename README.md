@@ -8,6 +8,12 @@
   A fast, native PostgreSQL client for macOS, with an AI assistant that uses the Claude Code, Codex or Cursor account already on your Mac.
 </p>
 
+<p align="center">
+  <a href="https://github.com/frizurd/postquel/releases/latest/download/Postquel.dmg"><strong>Download for Mac</strong></a>
+  ·
+  <a href="https://frizky.dev/products/postquel">Website</a>
+</p>
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
   <img src="docs/screenshot-light.png" alt="Postquel showing a SQL query with its results, and the assistant answering which customers spent the most">
