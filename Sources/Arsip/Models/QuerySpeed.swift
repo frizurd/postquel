@@ -42,7 +42,7 @@ enum QuerySpeed {
         case .failed: "The statement failed"
         case .fast: "Fast — under 100 ms"
         case .moderate: "Noticeable — 100 ms to 1 s"
-        case .slow: "Slow — over 1 s. Ask Claude to look at the plan."
+        case .slow: "Slow — over 1 s. Ask the assistant to look at the plan."
         }
     }
 }

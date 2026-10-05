@@ -1,20 +1,20 @@
 import Foundation
 import Observation
 
-/// Turns a plain-language request into SQL for the query editor. Claude inspects the real schema
+/// Turns a plain-language request into SQL for the query editor. The selected agent inspects the real schema
 /// through Arsip's read-only tools, so column names are checked rather than guessed.
 @MainActor @Observable
 final class SQLGenerator {
     private(set) var isRunning = false
     private(set) var error: String?
-    /// One-line remark from Claude about assumptions it made.
+    /// One-line remark from the agent about assumptions it made.
     private(set) var note: String?
 
-    @ObservationIgnored private let runner: ClaudeRunner
+    @ObservationIgnored private let runner: AgentRunner
     @ObservationIgnored private let databaseName: String
 
     init(config: ConnectionConfig) {
-        runner = ClaudeRunner(config: config)
+        runner = AgentRunner(config: config)
         databaseName = config.database
     }
 
@@ -42,23 +42,26 @@ final class SQLGenerator {
         }
 
         do {
+            let model = AgentCatalog.shared.selection
             let answer = try await runner.runOnce(
+                model: model,
                 prompt: prompt,
                 systemPrompt: systemPrompt,
                 // Schema and read-only queries only: no opening tabs or proposing changes from here.
-                allowedTools: "mcp__arsip__list_tables mcp__arsip__describe_table mcp__arsip__run_query mcp__arsip__explain_query",
+                tools: ["list_tables", "describe_table", "run_query", "explain_query"],
                 jsonSchema: [
                     "type": "object",
                     "properties": [
                         "sql": ["type": "string", "description": "The SQL, ready to run, without markdown fences"],
                         "note": ["type": "string", "description": "At most one short sentence about assumptions, or empty"],
                     ],
-                    "required": ["sql"],
+                    // Codex (OpenAI structured outputs) needs every property listed as required.
+                    "required": ["sql", "note"],
                     "additionalProperties": false,
                 ]
             )
             guard let sql = (answer["sql"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !sql.isEmpty else {
-                error = "Claude didn't return any SQL"
+                error = "\(model.agent.shortName) didn't return any SQL"
                 return nil
             }
             note = (answer["note"] as? String).flatMap { $0.isEmpty ? nil : $0 }

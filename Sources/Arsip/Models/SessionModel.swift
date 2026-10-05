@@ -543,7 +543,26 @@ final class SessionModel {
         guard let connection else { return nil }
         let browser = TableBrowserModel(relation: relation, connection: connection, filters: filters, sort: sort)
         browser.onStateChange = { [weak self] in self?.scheduleSave() }
+        browser.structure.onRenamed = { [weak self, weak browser] renamed in
+            guard let browser else { return }
+            self?.tableRenamed(browser, to: renamed)
+        }
         return WorkspaceTab(content: .table(browser))
+    }
+
+    /// After a rename in the Structure view: the tab reopens on the new name, still showing Structure.
+    private func tableRenamed(_ browser: TableBrowserModel, to renamed: RelationRef) {
+        guard let index = tabs.firstIndex(where: {
+            if case .table(let other) = $0.content { return other === browser }
+            return false
+        }), let tab = makeTableTab(renamed, filters: browser.filters, sort: browser.sort),
+              case .table(let replacement) = tab.content
+        else { return }
+        replacement.pane = browser.pane
+        let wasActive = tabs[index].id == activeTabID
+        tabs[index] = tab
+        if wasActive { activate(tab.id) } else { scheduleSave() }
+        Task { await refreshCatalog() }
     }
 
     private func makeQueryTab(text: String, savedQueryID: UUID? = nil, name: String? = nil) -> WorkspaceTab {

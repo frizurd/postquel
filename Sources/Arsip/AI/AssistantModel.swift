@@ -6,8 +6,8 @@ enum AssistantAction {
     case openQuery(sql: String)
 }
 
-/// Chat with Claude Code about the connected database. Each turn runs `claude -p` with
-/// Arsip's read-only MCP server; follow-up turns resume the same Claude session.
+/// Chat with an agent (Claude Code, Codex) about the connected database. Each turn runs the agent
+/// CLI with Arsip's read-only MCP server; follow-up turns resume the same agent session.
 @MainActor @Observable
 final class AssistantModel {
     struct ToolCall: Identifiable {
@@ -102,23 +102,25 @@ final class AssistantModel {
     @ObservationIgnored private var toolInputs: [String: [String: Any]] = [:]
     /// Runs a proposed statement in a transaction on the user's connection; `commit: false` rolls back.
     @ObservationIgnored var changeRunner: ((_ sql: String, _ commit: Bool) async -> ExecutionOutcome)?
-    /// What happened to proposals since the last prompt, told to Claude on the next turn.
+    /// What happened to proposals since the last prompt, told to the agent on the next turn.
     @ObservationIgnored private var notes: [String] = []
 
     @ObservationIgnored private let config: ConnectionConfig
     @ObservationIgnored private let serverVersion: String
-    @ObservationIgnored private let runner: ClaudeRunner
+    @ObservationIgnored private let runner: AgentRunner
     @ObservationIgnored private var sessionID: String?
+    /// The agent `sessionID` belongs to; switching agents starts a fresh session.
+    @ObservationIgnored private var sessionAgent: AgentKind?
+    /// The agent running the current turn, for error messages.
+    @ObservationIgnored private var runningAgent: AgentKind = .claude
     @ObservationIgnored private var runID = UUID()
 
     init(config: ConnectionConfig, serverVersion: String) {
         self.config = config
         self.serverVersion = serverVersion
-        runner = ClaudeRunner(config: config)
+        runner = AgentRunner(config: config)
         databaseName = config.database
     }
-
-    var isClaudeInstalled: Bool { ClaudeCLI.executableURL != nil }
 
     func send(_ text: String? = nil) {
         let prompt = (text ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -144,17 +146,25 @@ final class AssistantModel {
         proposalStates = [:]
         notes = []
         sessionID = nil
+        sessionAgent = nil
         error = nil
         revision += 1
     }
 
-    // MARK: Running claude
+    // MARK: Running the agent
 
     private func start(_ prompt: String) {
         let runID = UUID()
         self.runID = runID
+        let model = AgentCatalog.shared.selection
+        if sessionAgent != model.agent {
+            sessionID = nil
+            sessionAgent = model.agent
+        }
+        runningAgent = model.agent
         do {
             try runner.runStreaming(
+                model: model,
                 prompt: promptWithContext(prompt),
                 systemPrompt: systemPrompt,
                 resume: sessionID,
@@ -242,59 +252,39 @@ final class AssistantModel {
 
     // MARK: Stream events
 
-    private func handle(_ event: [String: Any], runID: UUID) {
-        guard runID == self.runID, let type = event["type"] as? String else { return }
+    private func handle(_ event: AgentEvent, runID: UUID) {
+        guard runID == self.runID else { return }
 
-        switch type {
-        case "system":
-            if let id = event["session_id"] as? String { sessionID = id }
+        switch event {
+        case .session(let id):
+            sessionID = id
 
-        case "stream_event":
-            guard let inner = event["event"] as? [String: Any], inner["type"] as? String == "content_block_delta",
-                  let delta = inner["delta"] as? [String: Any], delta["type"] as? String == "text_delta",
-                  let text = delta["text"] as? String
-            else { return }
+        case .textDelta(let text):
             appendText(text)
 
-        case "assistant":
-            let content = (event["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
-            for block in content where block["type"] as? String == "tool_use" {
-                guard let id = block["id"] as? String, !containsTool(id) else { continue }
-                let input = block["input"] as? [String: Any] ?? [:]
-                let name = (block["name"] as? String ?? "").replacingOccurrences(of: "mcp__arsip__", with: "")
-                toolInputs[id] = input
-                if name == "propose_change" { proposalStates[id] = .pending }
-                let detail = input["sql"] as? String ?? input["table"] as? String ?? input["schema"] as? String ?? ""
-                appendBlock(.tool(ToolCall(id: id, name: name, detail: detail, summary: input["summary"] as? String)))
+        case .message(let text):
+            appendText(Self.continuesText(messages.last) ? "\n\n" + text : text)
+
+        case .toolUse(let id, let name, let input):
+            guard !containsTool(id) else { return }
+            toolInputs[id] = input
+            if name == "propose_change" { proposalStates[id] = .pending }
+            let detail = input["sql"] as? String ?? input["table"] as? String ?? input["schema"] as? String ?? ""
+            appendBlock(.tool(ToolCall(id: id, name: name, detail: detail, summary: input["summary"] as? String)))
+
+        case .toolResult(let id, let output, let isError):
+            if updateTool(id, output: output, isError: isError), !isError {
+                performAction(for: id)
             }
 
-        case "user":
-            let content = (event["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
-            for block in content where block["type"] as? String == "tool_result" {
-                guard let id = block["tool_use_id"] as? String else { continue }
-                let text: String
-                if let string = block["content"] as? String {
-                    text = string
-                } else {
-                    let parts = block["content"] as? [[String: Any]] ?? []
-                    text = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
-                }
-                let isError = block["is_error"] as? Bool ?? false
-                if updateTool(id, output: text, isError: isError), !isError {
-                    performAction(for: id)
-                }
-            }
-
-        case "result":
-            if let id = event["session_id"] as? String { sessionID = id }
-            if event["is_error"] as? Bool == true || (event["subtype"] as? String).map({ $0 != "success" }) == true {
-                let errors = (event["errors"] as? [String])?.joined(separator: "\n")
-                error = event["result"] as? String ?? errors ?? "Claude Code reported an error"
-            }
-
-        default:
-            break
+        case .failed(let message):
+            error = message
         }
+    }
+
+    private static func continuesText(_ message: Message?) -> Bool {
+        guard case .text? = message?.blocks.last else { return false }
+        return true
     }
 
     private func finish(runID: UUID, status: Int32, stderr: String) {
@@ -302,7 +292,7 @@ final class AssistantModel {
         isRunning = false
         if status != 0, error == nil {
             let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            error = detail.isEmpty ? "Claude Code exited with status \(status)" : String(detail.suffix(1000))
+            error = detail.isEmpty ? "\(runningAgent.displayName) exited with status \(status)" : String(detail.suffix(1000))
         }
         dropEmptyReply()
         revision += 1

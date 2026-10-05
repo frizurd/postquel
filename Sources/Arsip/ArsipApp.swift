@@ -4,7 +4,7 @@ import SwiftUI
 @main
 enum Entry {
     static func main() {
-        // Claude Code launches this same binary as a stdio MCP server.
+        // Agent CLIs (Claude Code, Codex) launch this same binary as a stdio MCP server.
         if CommandLine.arguments.dropFirst().first == MCPServer.launchArgument {
             MCPServer.runFromEnvironment()
         } else {
@@ -59,6 +59,8 @@ struct BrowserView: View {
     @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
     @State private var showsQuickOpen = false
     @State private var renamingQuery: SavedQuery?
+    /// Tabs whose views are kept built, most recently used first.
+    @State private var builtTabIDs: [UUID] = []
 
     private var isSidebarVisible: Bool { columnVisibility != .detailOnly }
 
@@ -93,7 +95,7 @@ struct BrowserView: View {
                 }
             }
             .listStyle(.sidebar)
-            .safeAreaInset(edge: .bottom, spacing: 0) { ConnectionFooter(session: session) }
+            .floatingBar(edge: .bottom) { ConnectionFooter(session: session) }
             .searchable(text: $session.sidebarFilter, placement: .sidebar, prompt: "Filter tables")
             .navigationSplitViewColumnWidth(min: 200, ideal: 250)
             .toolbar(removing: .sidebarToggle)
@@ -159,6 +161,8 @@ struct BrowserView: View {
                 Image(systemName: "sidebar.left")
             }
             .buttonStyle(TitlebarIconButtonStyle())
+            .padding(2)
+            .glassOnly(Capsule())
             .keyboardShortcut("s", modifiers: [.control, .command])
             .help(isSidebarVisible ? "Hide sidebar (⌃⌘S)" : "Show sidebar (⌃⌘S)")
 
@@ -203,14 +207,35 @@ struct BrowserView: View {
         .padding(.vertical, 2)
     }
 
-    /// Only the active tab is rendered; its model keeps loaded rows and editor text across switches.
+    /// The most recently used tabs stay built while hidden, so switching between them is instant
+    /// instead of rebuilding the grid and editor. Older ones are rebuilt from their models on return.
     @ViewBuilder
     private var tabContents: some View {
-        if let tab = session.activeTab {
-            tabView(tab).id(tab.id)
-        } else {
+        if session.activeTab == nil {
             ContentUnavailableView("No Open Tabs", systemImage: "tablecells",
                                    description: Text("Pick a table from the sidebar"))
+        } else {
+            ZStack {
+                ForEach(session.tabs.filter { builtTabIDs.contains($0.id) || $0.id == session.activeTabID }) { tab in
+                    tabView(tab)
+                        .inactive(tab.id != session.activeTabID)
+                }
+            }
+            .onAppear { noteActiveTab() }
+            .onChange(of: session.activeTabID) { noteActiveTab() }
+        }
+    }
+
+    private static let builtTabLimit = 6
+
+    /// Moves the active tab to the front of the built list and lets the oldest ones go. Keyboard focus
+    /// is dropped too, so typing can't land in an editor that's now hidden.
+    private func noteActiveTab() {
+        guard let id = session.activeTabID else { return }
+        let open = Set(session.tabs.map(\.id))
+        builtTabIDs = Array(([id] + builtTabIDs.filter { $0 != id && open.contains($0) }).prefix(Self.builtTabLimit))
+        if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
+            window.makeFirstResponder(nil)
         }
     }
 
@@ -239,7 +264,8 @@ struct BrowserView: View {
             TableBrowserView(
                 model: browser,
                 onOpenRelation: { relation, filters in session.openTab(relation, filters: filters) },
-                onShowInspector: showValueInspector
+                onShowInspector: showValueInspector,
+                onOpenQuery: { session.openQueryTab(text: $0) }
             )
         }
     }

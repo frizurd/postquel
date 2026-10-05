@@ -5,7 +5,7 @@ enum InspectorMode: String {
     case value, assistant
 }
 
-/// Right-hand inspector: the selected cell's value, or the Claude assistant.
+/// Right-hand inspector: the selected cell's value, or the assistant.
 struct InspectorPanel: View {
     let session: SessionModel
     @Binding var mode: InspectorMode
@@ -49,7 +49,7 @@ struct InspectorPanel: View {
                 placeholder
             }
         case .query(let editor):
-            if let result = editor.currentResult?.rows, let cell = editor.selectedCell, contains(result, cell) {
+            if let result = editor.displayedRows, let cell = editor.selectedCell, contains(result, cell) {
                 CellEditor(source: result, cell: cell, isEditable: false, onSave: { _ in })
                     .id(EditorIdentity(result: ObjectIdentifier(result), cell: cell))
             } else {

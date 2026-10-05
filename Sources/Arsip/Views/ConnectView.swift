@@ -124,7 +124,7 @@ struct ConnectView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .floatingBar(edge: .bottom) {
                 HStack(spacing: 10) {
                     Spacer()
                     ProgressView()
@@ -134,13 +134,13 @@ struct ConnectView: View {
                     Button("Connect") {
                         Task { await session.connect(connections[index]) }
                     }
-                    .buttonStyle(SoftButtonStyle(prominent: true))
+                    .softButtonStyle(prominent: true)
+                    .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
                     .disabled(session.isConnecting || connections[index].host.isEmpty)
                 }
                 .padding(.horizontal, 24)
                 .frame(height: 56)
-                .background(.bar)
             }
         } else {
             ContentUnavailableView("No Connection Selected", systemImage: "cylinder.split.1x2")

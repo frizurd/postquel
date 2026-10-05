@@ -90,9 +90,8 @@ struct QuickOpenView: View {
             .frame(height: 28)
         }
         .frame(width: 520)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.quaternary))
-        .shadow(color: .black.opacity(0.28), radius: 24, y: 10)
+        .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
         .onAppear { isFocused = true }
         .onKeyPress(.upArrow) { move(-1) }
         .onKeyPress(.downArrow) { move(1) }
@@ -118,10 +117,10 @@ struct QuickOpenView: View {
                 .font(.caption)
                 .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
         }
-        .padding(.horizontal, 8)
-        .frame(height: 28)
+        .padding(.horizontal, 10)
+        .frame(height: 30)
         .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
             .fill(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.clear)))
     }
 

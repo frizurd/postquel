@@ -24,7 +24,9 @@ struct QueryEditorView: View {
                         onGenerate: { generate(with: generator) },
                         onClose: { showsPrompt = false }
                     )
-                    Divider()
+                    .padding([.horizontal, .top], 8)
+                    .padding(.bottom, 2)
+                    .background(Color(nsColor: .textBackgroundColor))
                 }
                 ZStack(alignment: .bottomTrailing) {
                     SQLEditor(
@@ -96,12 +98,15 @@ struct QueryEditorView: View {
                 Divider()
             }
 
-            if let rows = model.currentResult?.rows {
+            if let rows = model.displayedRows {
                 ResultsGrid(
                     source: rows,
+                    sort: model.resultSort,
+                    sortable: true,
                     selectedCell: model.selectedCell,
                     onSelectCell: { model.selectedCell = $0 },
-                    onRequestInspector: onShowInspector
+                    onRequestInspector: onShowInspector,
+                    onSort: { model.resultSort = $0 }
                 )
             } else if let error = model.error, model.results.isEmpty {
                 ScrollView {
@@ -132,12 +137,13 @@ struct QueryEditorView: View {
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .glassLabel()
             }
             if generator != nil {
                 Button { showsPrompt.toggle() } label: {
                     Label("Ask AI", systemImage: "sparkles")
                 }
-                .buttonStyle(SoftButtonStyle())
+                .softButtonStyle()
                 .keyboardShortcut("l")
                 .help("Describe the query you want (⌘L)")
             }
@@ -146,11 +152,12 @@ struct QueryEditorView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .glassLabel()
             } else if onSaveQuery != nil {
                 Button { showsSaveQuery = true } label: {
                     Label("Save", systemImage: "square.and.arrow.down")
                 }
-                .buttonStyle(SoftButtonStyle())
+                .softButtonStyle()
                 .disabled(model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .help("Keep this query in the sidebar for this database")
             }
@@ -163,14 +170,10 @@ struct QueryEditorView: View {
             } label: {
                 Label(model.isRunning ? "Cancel" : "Run", systemImage: model.isRunning ? "stop.fill" : "play.fill")
             }
-            .buttonStyle(SoftButtonStyle(prominent: !model.isRunning))
+            .softButtonStyle(prominent: !model.isRunning)
             .help(model.isRunning ? "Cancel the running query" : "Run the statement at the cursor (⌘↩)")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous).strokeBorder(.quaternary))
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        .modifier(RunControlSurface())
     }
 
     @ViewBuilder
@@ -183,9 +186,8 @@ struct QueryEditorView: View {
                 } label: {
                     Label("Analyze", systemImage: "sparkles")
                 }
-                .buttonStyle(SoftButtonStyle())
-                .controlSize(.small)
-                .help("Ask Claude why this is slow")
+                .barButtonStyle()
+                .help("Ask the assistant why this is slow")
             }
             Label {
                 Text(formatDuration(duration)).monospacedDigit()
@@ -230,7 +232,38 @@ struct QueryEditorView: View {
                 speedBadge(duration)
             }
         }
-        .statusBar()
+        .bottomBar()
+    }
+}
+
+/// On macOS 26 each run control is its own piece of glass, blended by a container. Before that,
+/// they share one floating material panel.
+private struct RunControlSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.glassGroup(spacing: 8)
+        } else {
+            content
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous).strokeBorder(.quaternary))
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        }
+    }
+}
+
+private extension View {
+    /// Plain text in a glass capsule on macOS 26, so it reads over the editor like the buttons beside it.
+    @ViewBuilder
+    func glassLabel() -> some View {
+        if #available(macOS 26, *) {
+            padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .glassEffect(.regular, in: Capsule())
+        } else {
+            self
+        }
     }
 }
 

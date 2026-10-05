@@ -224,6 +224,9 @@ final class EditorContainer: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        // Since macOS 14 views don't clip by default; keep the editor from painting over SwiftUI views above it.
+        clipsToBounds = true
+        gutter.clipsToBounds = true
         addSubview(gutter)
         addSubview(scroll)
     }
@@ -264,7 +267,7 @@ final class GutterView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.textBackgroundColor.setFill()
-        dirtyRect.fill()
+        bounds.intersection(dirtyRect).fill()
 
         guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer
         else { return }

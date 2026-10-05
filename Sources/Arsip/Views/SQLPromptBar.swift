@@ -30,10 +30,11 @@ struct SQLPromptBar: View {
                     ProgressView().controlSize(.small)
                     Button("Stop") { generator.cancel() }
                         .controlSize(.small)
+                        .softButtonStyle()
                 } else {
                     Button("Generate") { onGenerate() }
                         .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
+                        .softButtonStyle(prominent: true)
                         .disabled(request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 Button { onClose() } label: {
@@ -61,9 +62,10 @@ struct SQLPromptBar: View {
                     .lineLimit(2)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
         .padding(.vertical, 7)
-        .background(.bar)
+        .glassSurface(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onAppear { isFocused = true }
     }
 }

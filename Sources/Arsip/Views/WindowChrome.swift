@@ -5,8 +5,10 @@ import SwiftUI
 /// items. Toolbar items are split per column and get re-laid out whenever the sidebar or inspector
 /// resizes, which made them jump around.
 enum TitleBar {
-    /// The compact toolbar style's title bar height; the traffic lights are centered in it.
-    static let height: CGFloat = 38
+    /// The unified toolbar style's title bar height; the traffic lights are centered in it.
+    static let height: CGFloat = 52
+    /// Height of everything in the title bar row: tabs and the glass button groups.
+    static let controlHeight: CGFloat = 32
     /// Clearance for the traffic lights (they end at x = 72) when the sidebar is hidden.
     static let trafficLightsInset: CGFloat = 80
 }
@@ -33,7 +35,7 @@ struct WindowConfigurator: NSViewRepresentable {
                 window.toolbar = NSToolbar(identifier: "arsip.titlebar")
             }
             window.toolbar?.showsBaselineSeparator = false
-            window.toolbarStyle = .unifiedCompact
+            window.toolbarStyle = .unified
         }
     }
 }

@@ -192,8 +192,7 @@ struct ResultsGrid: NSViewRepresentable {
                       showsLink: value != nil && linkColumns.contains(column),
                       isInspected: selectedCell == CellSelection(row: row, column: column))
             cell.field.delegate = self
-            cell.linkButton.target = self
-            cell.linkButton.action = #selector(followLink(_:))
+            cell.setLinkTarget(self, action: #selector(followLink(_:)))
             return cell
         }
 
@@ -208,8 +207,13 @@ struct ResultsGrid: NSViewRepresentable {
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
             guard !syncingSort else { return }
-            let sort = tableView.sortDescriptors.first.flatMap { descriptor in
+            var sort = tableView.sortDescriptors.first.flatMap { descriptor in
                 descriptor.key.map { GridSort(column: $0, ascending: descriptor.ascending) }
+            }
+            // NSTableView only flips ascending/descending. A third click on a descending column
+            // goes back to the default order: ascending → descending → off.
+            if let current = parent.sort, !current.ascending, sort?.column == current.column, sort?.ascending == true {
+                sort = nil
             }
             parent.onSort?(sort)
         }
@@ -450,9 +454,12 @@ final class GridCell: NSTableCellView {
     private static let nullFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
 
     let field = NSTextField(labelWithString: "")
-    let linkButton = NSButton()
-    private var fieldToEdge: NSLayoutConstraint!
-    private var fieldToButton: NSLayoutConstraint!
+    /// The foreign key arrow. Created only in cells that show one: hundreds of hidden buttons made
+    /// every layout of the grid (scrolling, switching tabs) noticeably slower.
+    private var linkButton: NSButton?
+    private var showsLink = false
+    private weak var linkTarget: AnyObject?
+    private var linkAction: Selector?
 
     init() {
         super.init(frame: .zero)
@@ -463,41 +470,56 @@ final class GridCell: NSTableCellView {
         field.font = Self.font
         field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = true
-        field.translatesAutoresizingMaskIntoConstraints = false
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(field)
         textField = field
-
-        linkButton.image = NSImage(systemSymbolName: "chevron.right.circle.fill", accessibilityDescription: "Open referenced row")?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .regular))
-        linkButton.isBordered = false
-        linkButton.imagePosition = .imageOnly
-        linkButton.contentTintColor = .secondaryLabelColor
-        linkButton.toolTip = "Open referenced row in a new tab"
-        linkButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(linkButton)
-
-        fieldToEdge = field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
-        fieldToButton = field.trailingAnchor.constraint(equalTo: linkButton.leadingAnchor, constant: -3)
-        NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            field.centerYAnchor.constraint(equalTo: centerYAnchor),
-            fieldToEdge,
-            linkButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            linkButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            linkButton.widthAnchor.constraint(equalToConstant: 14),
-            linkButton.heightAnchor.constraint(equalToConstant: 14),
-        ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Where the arrow sends its clicks; applied when a cell first needs the button.
+    func setLinkTarget(_ target: AnyObject, action: Selector) {
+        linkTarget = target
+        linkAction = action
+        linkButton?.target = target
+        linkButton?.action = action
+    }
+
+    private func makeLinkButton() -> NSButton {
+        if let linkButton { return linkButton }
+        let button = NSButton()
+        button.image = NSImage(systemSymbolName: "chevron.right.circle.fill", accessibilityDescription: "Open referenced row")?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .regular))
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = "Open referenced row in a new tab"
+        button.target = linkTarget
+        button.action = linkAction
+        addSubview(button)
+        linkButton = button
+        return button
+    }
+
+    private func setShowsLink(_ shows: Bool) {
+        showsLink = shows
+        if shows { makeLinkButton().isHidden = false } else { linkButton?.isHidden = true }
+        needsLayout = true
+    }
+
+    /// Plain frames instead of Auto Layout: cells are laid out constantly while scrolling.
+    override func layout() {
+        super.layout()
+        let height = ceil(field.intrinsicContentSize.height)
+        let y = floor((bounds.height - height) / 2)
+        let trailing: CGFloat = showsLink ? 6 + 14 + 3 : 8
+        field.frame = NSRect(x: 8, y: y, width: max(bounds.width - 8 - trailing, 0), height: height)
+        linkButton?.frame = NSRect(x: bounds.width - 6 - 14, y: floor((bounds.height - 14) / 2), width: 14, height: 14)
+    }
+
     func show(_ value: String?, alignRight: Bool, showsLink: Bool, isInspected: Bool) {
         field.isEditable = false
         layer?.borderWidth = isInspected ? 1.5 : 0
-        linkButton.isHidden = !showsLink
-        fieldToEdge.isActive = !showsLink
-        fieldToButton.isActive = showsLink
+        if showsLink != self.showsLink { setShowsLink(showsLink) }
         field.alignment = alignRight ? .right : .left
         if let value {
             // Keep cells single-line and cheap to lay out.
@@ -516,9 +538,7 @@ final class GridCell: NSTableCellView {
     func showDraft(_ value: String?, alignRight: Bool) {
         field.isEditable = false
         field.alignment = alignRight ? .right : .left
-        linkButton.isHidden = true
-        fieldToButton.isActive = false
-        fieldToEdge.isActive = true
+        if showsLink { setShowsLink(false) }
         layer?.borderWidth = 0
         if let value {
             field.stringValue = value

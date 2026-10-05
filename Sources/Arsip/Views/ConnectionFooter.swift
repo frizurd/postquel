@@ -10,17 +10,16 @@ struct ConnectionFooter: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Divider()
+            if #unavailable(macOS 26) { Divider() }
             Button {
                 showMenu()
             } label: {
                 label
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 6)
-            .frame(height: 36)
+            .padding(.horizontal, footerInset)
+            .padding(.vertical, footerInset)
         }
-        .background(.bar)
         .onHover { isHovered = $0 }
         .sheet(isPresented: $showsNewDatabase) {
             NewDatabaseSheet(session: session)
@@ -30,8 +29,8 @@ struct ConnectionFooter: View {
         }
     }
 
-    /// Same icon column, spacing and text position as the table rows above: the icon starts
-    /// 18pt from the sidebar edge (6pt highlight inset + 12pt), the text 44pt.
+    /// Same icon size and spacing as the table rows above. Before macOS 26 the icon also lines up
+    /// with theirs (6pt inset + 12pt); on 26 the glass capsule is inset a little further.
     private var label: some View {
         HStack(spacing: 9) {
             Image(systemName: "cylinder.split.1x2.fill")
@@ -48,12 +47,16 @@ struct ConnectionFooter: View {
                 .foregroundStyle(isHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         }
         .padding(.leading, 12)
-        .padding(.trailing, 10)
-        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
-            .fill(isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))
-        .contentShape(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous))
+        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity, minHeight: TitleBar.controlHeight, alignment: .leading)
+        .modifier(FooterButtonBackground(isHovered: isHovered))
         .help("\(session.config.user)@\(session.config.host) · \(session.connection?.serverVersion ?? "")")
+    }
+
+    /// Room around the button: a glass capsule floats with even space on every side on macOS 26;
+    /// before that it lines up with the sidebar rows above.
+    private var footerInset: CGFloat {
+        if #available(macOS 26, *) { 10 } else { 6 }
     }
 
     /// An AppKit menu: a SwiftUI Menu imposes its own label insets, which broke the alignment
@@ -88,6 +91,25 @@ struct ConnectionFooter: View {
         menuActions = actions  // keep the targets alive while the menu is open
         if let event = NSApp.currentEvent, let view = event.window?.contentView {
             menu.popUp(positioning: nil, at: view.convert(event.locationInWindow, from: nil), in: view)
+        }
+    }
+}
+
+/// A glass capsule on macOS 26, so the database switcher reads as a button; before that, a
+/// rounded highlight on hover like the sidebar rows.
+private struct FooterButtonBackground: ViewModifier {
+    let isHovered: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+                .contentShape(Capsule())
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .background(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous)
+                    .fill(isHovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))
+                .contentShape(RoundedRectangle(cornerRadius: Theme.smallCorner, style: .continuous))
         }
     }
 }

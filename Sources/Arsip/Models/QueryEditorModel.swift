@@ -45,6 +45,24 @@ final class QueryEditorModel {
         results.indices.contains(selectedResultIndex) ? results[selectedResultIndex] : nil
     }
 
+    /// Header-click sort of the rows on screen; kept across runs while the column still exists.
+    var resultSort: GridSort? {
+        didSet { selectedCell = nil }
+    }
+    @ObservationIgnored private var sortedCache: (rows: ObjectIdentifier, sort: GridSort, source: SortedRows)?
+
+    /// The current result's rows in the order shown: as returned, or sorted by `resultSort`.
+    var displayedRows: GridSource? {
+        guard let rows = currentResult?.rows else { return nil }
+        guard let resultSort, rows.columns.contains(where: { $0.name == resultSort.column }) else { return rows }
+        if let cache = sortedCache, cache.rows == ObjectIdentifier(rows), cache.sort == resultSort {
+            return cache.source
+        }
+        let sorted = SortedRows(base: rows, sort: resultSort)
+        sortedCache = (ObjectIdentifier(rows), resultSort, sorted)
+        return sorted
+    }
+
     var activeStatementText: String? {
         guard let active else { return nil }
         return (text as NSString).substring(with: active.range)

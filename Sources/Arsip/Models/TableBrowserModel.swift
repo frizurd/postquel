@@ -56,12 +56,24 @@ final class TableBrowserModel {
     private(set) var isSaving = false
     var sort: GridSort?
     var page = 0
+    /// Which of Content, Structure and DDL the tab shows.
+    var pane: TablePane = .content
+    /// Structure and DDL; loaded the first time either is shown.
+    let structure: TableStructureModel
 
     init(relation: RelationRef, connection: PGConnection, filters: [ColumnFilter] = [], sort: GridSort? = nil) {
         self.relation = relation
         self.connection = connection
         self.filters = filters
         self.sort = sort
+        structure = TableStructureModel(relation: relation, connection: connection)
+        structure.onSaved = { [weak self] in
+            guard let self, self.started else { return }
+            self.pinnedKeys = []
+            self.pinnedResult = nil
+            await self.loadMetadata()
+            await self.load()
+        }
     }
 
     var title: String {
@@ -227,6 +239,8 @@ final class TableBrowserModel {
         started = true
         await loadMetadata()
         await load()
+        // Fetch the structure right after the rows, so Structure and DDL open without waiting.
+        await structure.start()
     }
 
     /// ⌘R: also drops pinned rows, so everything sits in its real position again.
@@ -235,6 +249,8 @@ final class TableBrowserModel {
         pinnedResult = nil
         await loadMetadata()
         await load()
+        // Structure edits in progress are kept rather than overwritten.
+        if structure.isLoaded, !structure.hasPendingChanges { await structure.load() }
     }
 
     func load() async {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// A small MCP server over stdio (newline-delimited JSON-RPC 2.0) that gives an AI agent
-/// read-only tools for one database. Claude Code starts it as `Arsip --mcp-server` with the
+/// read-only tools for one database. The agent CLI starts it as `Arsip --mcp-server` with the
 /// connection details in the environment; it opens its own connection.
 final class MCPServer {
     static let launchArgument = "--mcp-server"

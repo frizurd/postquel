@@ -5,6 +5,7 @@ struct AssistantPanel: View {
     @Bindable var model: AssistantModel
     var onOpenSQL: (String) -> Void
     @FocusState private var composerFocused: Bool
+    private var catalog: AgentCatalog { .shared }
 
     private let suggestions = [
         "What tables are there and how do they relate?",
@@ -16,32 +17,38 @@ struct AssistantPanel: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if !model.isClaudeInstalled {
-                notInstalled
-            } else if model.messages.isEmpty {
-                emptyState
-            } else {
-                transcript
+            Group {
+                if catalog.isLoaded && catalog.installed.isEmpty {
+                    notInstalled
+                } else if model.messages.isEmpty {
+                    emptyState
+                } else {
+                    transcript
+                }
             }
-            if let error = model.error {
-                errorBanner(error)
+            .frame(maxHeight: .infinity)
+            // The transcript scrolls under the composer, which floats on glass.
+            .floatingBar(edge: .bottom) {
+                VStack(spacing: 8) {
+                    if let error = model.error {
+                        errorBanner(error)
+                    }
+                    composer
+                }
+                .padding(10)
             }
-            composer
         }
         .onAppear { composerFocused = true }
     }
 
     private var header: some View {
         HStack(spacing: 6) {
-            Image(systemName: "sparkles").foregroundStyle(.tint)
-            Text("Claude").font(.headline)
-            Text("Read-only")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(.quinary))
-                .help("Claude can read schema and run queries in a read-only transaction. It can't change data.")
+            modelMenu
+            Label("Read-only", systemImage: "lock.fill")
+                .labelStyle(.titleAndIcon)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.tertiary)
+                .help("\(catalog.selection.agent.shortName) can read schema and run queries in a read-only transaction. It can't change data.")
             Spacer()
             Button { model.newConversation() } label: {
                 Image(systemName: "square.and.pencil")
@@ -50,9 +57,36 @@ struct AssistantPanel: View {
             .disabled(model.messages.isEmpty && !model.isRunning)
             .help("New conversation")
         }
-        .padding(.leading, 12)
+        .padding(.leading, 8)
         .padding(.trailing, 6)
         .frame(height: 40)
+    }
+
+    /// Every model of every agent CLI installed on this Mac.
+    private var modelMenu: some View {
+        Menu {
+            ForEach(catalog.installed) { agent in
+                Section(agent.displayName) {
+                    ForEach(catalog.models(for: agent)) { option in
+                        Toggle(option.name, isOn: Binding(
+                            get: { catalog.selection == option },
+                            set: { if $0 { catalog.selection = option } }
+                        ))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles").foregroundStyle(.tint)
+                Text(catalog.selection.title).fontWeight(.semibold)
+            }
+        }
+        .menuStyle(.button)
+        .menuIndicator(.visible)
+        .modelMenuButtonStyle()
+        .fixedSize()
+        .disabled(!catalog.isLoaded)
+        .help("Choose the agent and model. Changing agents starts a fresh session for the next message.")
     }
 
     private var emptyState: some View {
@@ -63,7 +97,7 @@ struct AssistantPanel: View {
                 .foregroundStyle(.tint)
             Text("Ask about \(model.databaseName)")
                 .font(.title3.weight(.semibold))
-            Text("Claude explores the schema and runs read-only queries using your Claude Code account.")
+            Text("\(catalog.selection.agent.shortName) explores the schema and runs read-only queries using your \(catalog.selection.agent.displayName) account.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -74,10 +108,10 @@ struct AssistantPanel: View {
                             .font(.callout)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.quinary))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                             .contentShape(Rectangle())
+                            .glassSurface(RoundedRectangle(cornerRadius: 12, style: .continuous), interactive: true)
                     }
                     .buttonStyle(.plain)
                 }
@@ -91,11 +125,12 @@ struct AssistantPanel: View {
 
     private var notInstalled: some View {
         ContentUnavailableView {
-            Label("Claude Code Not Found", systemImage: "sparkles")
+            Label("No Coding Agent Found", systemImage: "sparkles")
         } description: {
-            Text("Arsip uses your Claude Code subscription. Install Claude Code, run `claude` once in Terminal to sign in, then reopen this panel.")
+            Text("Arsip uses your Claude Code or Codex subscription. Install one, run `claude` or `codex` once in Terminal to sign in, then relaunch Arsip.")
         } actions: {
             Link("Get Claude Code", destination: URL(string: "https://claude.com/claude-code")!)
+            Link("Get Codex", destination: URL(string: "https://developers.openai.com/codex/cli")!)
         }
         .frame(maxHeight: .infinity)
     }
@@ -139,7 +174,7 @@ struct AssistantPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)
-        .background(Color.red.opacity(0.08))
+        .glassSurface(RoundedRectangle(cornerRadius: 14, style: .continuous), tint: .red.opacity(0.25))
     }
 
     private var composer: some View {
@@ -168,15 +203,10 @@ struct AssistantPanel: View {
                 .help("Send (↩)")
             }
         }
-        .padding(.leading, 10)
+        .padding(.leading, 12)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor))
-                .strokeBorder(.quaternary)
-        )
-        .padding(10)
+        .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -192,10 +222,11 @@ private struct MessageView: View {
             if case .text(_, let text) = message.blocks.first {
                 Text(text)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quinary))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.accentColor.opacity(0.12)))
                     .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.leading, 32)
             }
         case .assistant:
             VStack(alignment: .leading, spacing: 10) {
@@ -227,7 +258,7 @@ private struct MessageView: View {
     }
 }
 
-/// A change Claude proposed: review, dry-run, apply or dismiss.
+/// A change the agent proposed: review, dry-run, apply or dismiss.
 private struct ProposalCard: View {
     let model: AssistantModel
     let call: AssistantModel.ToolCall
@@ -561,5 +592,17 @@ private struct CodeBlockView: View {
         }
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .textBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.quaternary))
+    }
+}
+
+private extension View {
+    /// The model picker reads as a button: a glass capsule on macOS 26, a bordered button before.
+    @ViewBuilder
+    func modelMenuButtonStyle() -> some View {
+        if #available(macOS 26, *) {
+            buttonStyle(.glass).buttonBorderShape(.capsule)
+        } else {
+            buttonStyle(.bordered).buttonBorderShape(.capsule)
+        }
     }
 }

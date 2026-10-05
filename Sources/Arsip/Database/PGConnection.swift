@@ -195,9 +195,16 @@ final class PGConnection: @unchecked Sendable {
     }
 
     private func executeSync(_ sql: String, params: [String?], singleStatement: Bool) -> ExecutionOutcome {
+        // Timed out here rather than with a `defer` inside: a defer runs after `return outcome`
+        // has copied the struct, so the duration it sets never reaches the caller.
         let started = Date()
+        var outcome = executeUntimed(sql, params: params, singleStatement: singleStatement)
+        outcome.duration = Date().timeIntervalSince(started)
+        return outcome
+    }
+
+    private func executeUntimed(_ sql: String, params: [String?], singleStatement: Bool) -> ExecutionOutcome {
         var outcome = ExecutionOutcome()
-        defer { outcome.duration = Date().timeIntervalSince(started) }
 
         if PQstatus(conn) != CONNECTION_OK {
             PQreset(conn)
