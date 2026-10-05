@@ -4,7 +4,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-snapshot() { find Sources Package.swift -type f -exec stat -f '%m %N' {} + | sort | shasum; }
+snapshot() { find Sources Resources scripts Package.swift -type f -exec stat -f '%m %N' {} + | sort | shasum; }
 
 build() {
     echo "── $(date +%H:%M:%S) building…"

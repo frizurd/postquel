@@ -1,0 +1,4 @@
+Tool: built-in imagegen
+Operation: remove the inset tile and use a flat dark background.
+
+Use case: precise-object-edit. Edit target: supplied silver logo on a dark tile. Change ONLY the background. Remove the rounded-square tile boundary and ALL transparent outer padding. Replace the ENTIRE square canvas, corner to corner and edge to edge, with one perfectly uniform flat solid graphite color #202124. This is a plain background, NOT a visible shaped tile or container. No rounded-square shape, no inset panel, no border, no rim, no bevel, no vignette, no gradient, no background texture, no background shadow, no transparency. Preserve the silver symbol exactly in its current centered position and scale: same silhouette, curled ribbon, rounded lobes, soft silver highlights and shading. Do not redesign the symbol or add any elements. The result is just the existing silver mark on a seamless flat dark square canvas.

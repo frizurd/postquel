@@ -1,0 +1,4 @@
+Tool: built-in imagegen
+Operation: background extraction from the approved soft silver logo.
+
+Use case: background-extraction. Edit target: provided pale silver abstract logo. Remove ONLY the white background to create a clean PNG with actual transparent alpha. Preserve the silver symbol exactly: identical silhouette, central curled ribbon, rounded lobes, proportions, soft pale silver metallic finish, subtle highlights and minimal shading. Do not redesign or add anything. Keep all symbol interior surfaces opaque, even the white highlights. Clean antialiased edges, no white matte halo, no cast shadow, no frame, no tile, no text. Same centered placement and square canvas. Fully transparent empty space surrounding the symbol, not a painted checkerboard.
