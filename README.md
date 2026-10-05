@@ -43,3 +43,7 @@ Demo data: `createdb postquel_demo && psql postquel_demo -f scripts/seed-demo.sq
 - `Sources/Postquel/Database` – `PGConnection` (libpq on a serial queue, text results, cancel)
 - `Sources/Postquel/Models` – session, table browser, query editor state
 - `Sources/Postquel/Views` – `ResultsGrid` (NSTableView), `SQLEditor` (NSTextView), SwiftUI shell
+
+## License
+
+[MIT](LICENSE) © 2026 frizky.dev
