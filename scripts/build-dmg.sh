@@ -23,8 +23,17 @@ mkdir -p "$STAGING"
 cp -R build/Postquel.app "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 
-hdiutil create -volname "Postquel $VERSION" -srcfolder "$STAGING" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null
-rm -rf "$STAGING"
+# The mounted disk shows the app icon: a writable image gets .VolumeIcon.icns and the volume's
+# custom-icon flag, then is compressed into the final read-only DMG.
+cp build/AppIcon.icns "$STAGING/.VolumeIcon.icns"
+RW="build/Postquel-rw.dmg"
+rm -f "$RW"
+hdiutil create -volname "Postquel $VERSION" -srcfolder "$STAGING" -fs HFS+ -format UDRW -ov "$RW" >/dev/null
+MOUNT=$(hdiutil attach -nobrowse -noautoopen "$RW" | awk -F'\t' '/\/Volumes\// { print $NF }')
+xcrun SetFile -a C "$MOUNT"
+hdiutil detach "$MOUNT" >/dev/null
+hdiutil convert "$RW" -format UDZO -o "$DMG" -ov >/dev/null
+rm -rf "$STAGING" "$RW"
 
 if [[ -n "${DEVELOPER_ID:-}" ]]; then
     codesign --force --sign "$DEVELOPER_ID" --timestamp "$DMG"

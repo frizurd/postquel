@@ -8,8 +8,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION=0.1.0
-BUILD_NUMBER=1
+VERSION=0.1.1
+BUILD_NUMBER=2
 LIBPQ_PREFIX="${LIBPQ_PREFIX:-/Applications/Postgres.app/Contents/Versions/latest}"
 
 INSTALL=false
