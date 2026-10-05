@@ -7,7 +7,7 @@ enum AssistantAction {
 }
 
 /// Chat with an agent (Claude Code, Codex, Cursor) about the connected database. Each turn runs the agent
-/// CLI with Arsip's read-only MCP server; follow-up turns resume the same agent session.
+/// CLI with Postquel's read-only MCP server; follow-up turns resume the same agent session.
 @MainActor @Observable
 final class AssistantModel {
     struct ToolCall: Identifiable {
@@ -182,7 +182,7 @@ final class AssistantModel {
         let context = ([contextProvider?()].compactMap { $0 } + notes).filter { !$0.isEmpty }
         notes = []
         guard !context.isEmpty else { return prompt }
-        return "<arsip_context>\n\(context.joined(separator: "\n"))\n</arsip_context>\n\n\(prompt)"
+        return "<postquel_context>\n\(context.joined(separator: "\n"))\n</postquel_context>\n\n\(prompt)"
     }
 
     // MARK: Proposed changes
@@ -232,10 +232,10 @@ final class AssistantModel {
 
     private var systemPrompt: String {
         """
-        You are the database assistant inside Arsip, a native macOS PostgreSQL client.
+        You are the database assistant inside Postquel, a native macOS PostgreSQL client.
         Connected database: \(config.database) on \(config.host):\(config.port) as \(config.user) (\(serverVersion)).
 
-        - Use the arsip tools (list_tables, describe_table, run_query, explain_query) to look at the real schema \
+        - Use the postquel tools (list_tables, describe_table, run_query, explain_query) to look at the real schema \
         and data before answering. Don't guess column names.
         - Your access is read-only. If the user wants to change data or schema, write the SQL for them to review \
         and run themselves, and say what it will affect.
@@ -246,7 +246,7 @@ final class AssistantModel {
         (locks on big tables, irreversible deletes) briefly.
         - Be concise. Put short SQL in ```sql code blocks (the user can open them in a query tab). \
         Use small markdown tables for small results.
-        - <arsip_context> describes what the user currently has open in Arsip.
+        - <postquel_context> describes what the user currently has open in Postquel.
         """
     }
 

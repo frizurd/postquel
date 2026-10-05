@@ -67,7 +67,7 @@ struct ExecutionOutcome {
 final class PGConnection: @unchecked Sendable {
     private let conn: OpaquePointer
     private let cancelHandle: OpaquePointer?
-    private let queue = DispatchQueue(label: "arsip.pg.connection", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "postquel.pg.connection", qos: .userInitiated)
     let serverVersion: String
 
     private init(conn: OpaquePointer) {
@@ -91,7 +91,7 @@ final class PGConnection: @unchecked Sendable {
     }
 
     /// Blocking connect, for callers that aren't on the main thread (e.g. the MCP server).
-    static func open(_ config: ConnectionConfig, applicationName: String = "Arsip") throws -> PGConnection {
+    static func open(_ config: ConnectionConfig, applicationName: String = "Postquel") throws -> PGConnection {
         var params: [(String, String)] = [
             ("host", config.host),
             ("port", String(config.port)),

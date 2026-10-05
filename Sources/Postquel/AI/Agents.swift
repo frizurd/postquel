@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// A coding-agent CLI that Arsip can drive with its read-only MCP server.
+/// A coding-agent CLI that Postquel can drive with its read-only MCP server.
 enum AgentKind: String, CaseIterable, Identifiable, Sendable {
     case claude
     case codex
@@ -218,7 +218,7 @@ enum AgentCLI {
     /// An empty directory, so no project CLAUDE.md, AGENTS.md or settings get picked up.
     static var workingDirectory: URL {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Arsip/Assistant", isDirectory: true)
+            .appendingPathComponent("Postquel/Assistant", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

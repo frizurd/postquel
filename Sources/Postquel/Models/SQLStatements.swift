@@ -1,6 +1,6 @@
 import Foundation
 
-/// Splits editor text into individual statements so Arsip can run exactly one.
+/// Splits editor text into individual statements so Postquel can run exactly one.
 /// Semicolons inside strings, quoted identifiers, dollar-quoted bodies and comments don't split.
 enum SQLStatements {
     /// Ranges of each statement, without the trailing semicolon, ignoring blank/comment-only pieces.

@@ -13,14 +13,14 @@ enum AgentEvent {
     case failed(String)
 }
 
-/// Runs an agent CLI (`claude -p`, `codex exec` or `cursor-agent -p`) with Arsip's read-only MCP
+/// Runs an agent CLI (`claude -p`, `codex exec` or `cursor-agent -p`) with Postquel's read-only MCP
 /// server attached. Used both by the chat panel (streaming) and by SQL generation (one structured answer).
 @MainActor
 final class AgentRunner {
     private let config: ConnectionConfig
     private var process: Process?
     /// Cursor ties a chat to its workspace folder, so each runner keeps one for its whole life:
-    /// follow-up turns resume there. It holds Arsip's rules and permissions, never the password.
+    /// follow-up turns resume there. It holds Postquel's rules and permissions, never the password.
     private let cursorWorkspace = AgentCLI.workingDirectory.appendingPathComponent("cursor-\(UUID().uuidString)", isDirectory: true)
 
     init(config: ConnectionConfig) {
@@ -34,7 +34,7 @@ final class AgentRunner {
     var isRunning: Bool { process != nil }
 
     /// Streams events as they arrive; `onFinish` gets the exit status and anything on stderr.
-    /// `tools` limits which Arsip tools the agent may call; nil allows all of them.
+    /// `tools` limits which Postquel tools the agent may call; nil allows all of them.
     func runStreaming(
         model: AgentModel,
         prompt: String,
@@ -264,10 +264,10 @@ final class AgentRunner {
     ) throws -> [String] {
         var arguments = [
             "-p",
-            "--tools", "",  // no shell or file tools, only Arsip's database tools
+            "--tools", "",  // no shell or file tools, only Postquel's database tools
             "--mcp-config", mcpConfig.path,
             "--strict-mcp-config",
-            "--allowedTools", tools.map { $0.map { "mcp__arsip__\($0)" }.joined(separator: " ") } ?? "mcp__arsip",
+            "--allowedTools", tools.map { $0.map { "mcp__postquel__\($0)" }.joined(separator: " ") } ?? "mcp__postquel",
             "--permission-mode", "dontAsk",
             "--setting-sources", "",
             "--append-system-prompt", systemPrompt,
@@ -283,7 +283,7 @@ final class AgentRunner {
         return arguments
     }
 
-    /// Codex features that would give the agent anything beyond Arsip's database tools.
+    /// Codex features that would give the agent anything beyond Postquel's database tools.
     private static let codexDisabledFeatures = [
         "shell_tool", "unified_exec", "apps", "plugins", "skill_search", "browser_use", "browser_use_external",
         "in_app_browser", "computer_use", "image_generation", "view_image", "multi_agent", "goals",
@@ -298,12 +298,12 @@ final class AgentRunner {
             "-c", "sandbox_mode=\"read-only\"",
             "-c", "web_search=\"disabled\"",
             "-c", "developer_instructions=" + Self.toml(systemPrompt),
-            "-c", "mcp_servers.arsip.command=" + Self.toml(executablePath),
-            "-c", "mcp_servers.arsip.args=" + Self.toml([MCPServer.launchArgument]),
-            "-c", "mcp_servers.arsip.env_vars=" + Self.toml(mcpEnvironment.keys.sorted()),
+            "-c", "mcp_servers.postquel.command=" + Self.toml(executablePath),
+            "-c", "mcp_servers.postquel.args=" + Self.toml([MCPServer.launchArgument]),
+            "-c", "mcp_servers.postquel.env_vars=" + Self.toml(mcpEnvironment.keys.sorted()),
         ]
         arguments += Self.codexDisabledFeatures.flatMap { ["--disable", $0] }
-        if let tools { arguments += ["-c", "mcp_servers.arsip.enabled_tools=" + Self.toml(tools)] }
+        if let tools { arguments += ["-c", "mcp_servers.postquel.enabled_tools=" + Self.toml(tools)] }
         if let name = model.model { arguments += ["-m", name] }
         if let schema { arguments += ["--output-schema", schema.path] }
         if let resume { arguments.append(resume) }
@@ -324,10 +324,10 @@ final class AgentRunner {
             instructions += "\n\nEnd your final reply with only a JSON object matching this JSON Schema, with no code fences:\n\(schema)"
         }
         try Data("---\nalwaysApply: true\n---\n\(instructions)\n".utf8)
-            .write(to: rulesDirectory.appendingPathComponent("arsip.mdc"))
+            .write(to: rulesDirectory.appendingPathComponent("postquel.mdc"))
 
-        // Only Arsip's database tools: no shell, no file access, no web.
-        let allowed = tools.map { $0.map { "Mcp(arsip:\($0))" } } ?? ["Mcp(arsip:*)"]
+        // Only Postquel's database tools: no shell, no file access, no web.
+        let allowed = tools.map { $0.map { "Mcp(postquel:\($0))" } } ?? ["Mcp(postquel:*)"]
         let permissions: [String: Any] = [
             "permissions": ["allow": allowed, "deny": ["Shell(*)", "Read(**)", "Write(**)", "WebFetch(*)"]],
         ]
@@ -344,7 +344,7 @@ final class AgentRunner {
             "-p",
             "--output-format", "stream-json",
             "--stream-partial-output",
-            "--approve-mcps",  // load Arsip's server without asking; calls still need the allow list above
+            "--approve-mcps",  // load Postquel's server without asking; calls still need the allow list above
             "--trust",
             "--workspace", cursorWorkspace.path,
         ]
@@ -368,7 +368,7 @@ final class AgentRunner {
         guard let executablePath = Bundle.main.executablePath else { throw PGError("Unknown executable path") }
         let json: [String: Any] = [
             "mcpServers": [
-                "arsip": [
+                "postquel": [
                     "type": "stdio",
                     "command": executablePath,
                     "args": [MCPServer.launchArgument],
@@ -441,7 +441,7 @@ final class AgentEventParser {
             let content = (event["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
             return content.compactMap { block in
                 guard block["type"] as? String == "tool_use", let id = block["id"] as? String else { return nil }
-                let name = (block["name"] as? String ?? "").replacingOccurrences(of: "mcp__arsip__", with: "")
+                let name = (block["name"] as? String ?? "").replacingOccurrences(of: "mcp__postquel__", with: "")
                 return .toolUse(id: id, name: name, input: block["input"] as? [String: Any] ?? [:])
             }
 
@@ -535,7 +535,7 @@ final class AgentEventParser {
 
         case "tool_call":
             streamedText = ""
-            // Only Arsip's tools are shown; Cursor's own lookups (getMcpTools…) are bookkeeping.
+            // Only Postquel's tools are shown; Cursor's own lookups (getMcpTools…) are bookkeeping.
             guard let id = event["call_id"] as? String,
                   let call = (event["tool_call"] as? [String: Any])?["mcpToolCall"] as? [String: Any]
             else { return [] }

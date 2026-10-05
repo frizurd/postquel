@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds build/Arsip.app from the SwiftPM executable.
+# Builds build/Postquel.app from the SwiftPM executable.
 #   ./scripts/build-app.sh            build only
 #   ./scripts/build-app.sh --install  build, copy to /Applications, relaunch if running
 set -euo pipefail
@@ -15,20 +15,20 @@ for arg in "$@"; do
 done
 swift build -c "$CONFIG"
 
-APP=build/Arsip.app
+APP=build/Postquel.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp ".build/$CONFIG/Arsip" "$APP/Contents/MacOS/Arsip"
+cp ".build/$CONFIG/Postquel" "$APP/Contents/MacOS/Postquel"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Arsip</string>
-    <key>CFBundleDisplayName</key><string>Arsip</string>
-    <key>CFBundleIdentifier</key><string>dev.arsip.Arsip</string>
-    <key>CFBundleExecutable</key><string>Arsip</string>
+    <key>CFBundleName</key><string>Postquel</string>
+    <key>CFBundleDisplayName</key><string>Postquel</string>
+    <key>CFBundleIdentifier</key><string>dev.postquel.Postquel</string>
+    <key>CFBundleExecutable</key><string>Postquel</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
@@ -39,20 +39,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Sign with a stable identity when available, so Keychain access granted to Arsip survives rebuilds.
+# Sign with a stable identity when available, so Keychain access granted to Postquel survives rebuilds.
 IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ { print $2; exit }')}"
 codesign --force --sign "${IDENTITY:--}" "$APP" 2>/dev/null
 echo "Built $APP"
 
 if $INSTALL; then
     WAS_RUNNING=false
-    if pgrep -x Arsip >/dev/null; then
+    if pgrep -x Postquel >/dev/null; then
         WAS_RUNNING=true
-        pkill -x Arsip
-        while pgrep -x Arsip >/dev/null; do sleep 0.1; done
+        pkill -x Postquel
+        while pgrep -x Postquel >/dev/null; do sleep 0.1; done
     fi
-    rm -rf /Applications/Arsip.app
-    cp -R "$APP" /Applications/Arsip.app
-    echo "Installed /Applications/Arsip.app"
-    if $WAS_RUNNING; then open /Applications/Arsip.app; echo "Relaunched"; fi
+    rm -rf /Applications/Postquel.app
+    cp -R "$APP" /Applications/Postquel.app
+    echo "Installed /Applications/Postquel.app"
+    if $WAS_RUNNING; then open /Applications/Postquel.app; echo "Relaunched"; fi
 fi

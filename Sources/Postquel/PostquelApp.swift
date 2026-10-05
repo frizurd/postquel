@@ -4,20 +4,21 @@ import SwiftUI
 @main
 enum Entry {
     static func main() {
-        // Agent CLIs (Claude Code, Codex) launch this same binary as a stdio MCP server.
+        // Agent CLIs (Claude Code, Codex, Cursor) launch this same binary as a stdio MCP server.
         if CommandLine.arguments.dropFirst().first == MCPServer.launchArgument {
             MCPServer.runFromEnvironment()
         } else {
-            ArsipApp.main()
+            LegacyMigration.migrateSettings()
+            PostquelApp.main()
         }
     }
 }
 
-struct ArsipApp: App {
+struct PostquelApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Arsip") {
+        WindowGroup("Postquel") {
             ContentView()
         }
         .defaultSize(width: 1240, height: 780)

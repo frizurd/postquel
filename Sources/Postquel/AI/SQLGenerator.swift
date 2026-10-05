@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Turns a plain-language request into SQL for the query editor. The selected agent inspects the real schema
-/// through Arsip's read-only tools, so column names are checked rather than guessed.
+/// through Postquel's read-only tools, so column names are checked rather than guessed.
 @MainActor @Observable
 final class SQLGenerator {
     private(set) var isRunning = false
@@ -74,7 +74,7 @@ final class SQLGenerator {
 
     private var systemPrompt: String {
         """
-        You write PostgreSQL for the SQL editor of Arsip, a database client. The database is \(databaseName).
+        You write PostgreSQL for the SQL editor of Postquel, a database client. The database is \(databaseName).
 
         - Inspect the real schema with list_tables and describe_table before writing anything. Never guess \
         table or column names. You may run read-only queries to check values.

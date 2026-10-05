@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Arsip draws its own title bar row (tabs and buttons) as ordinary content instead of toolbar
+/// Postquel draws its own title bar row (tabs and buttons) as ordinary content instead of toolbar
 /// items. Toolbar items are split per column and get re-laid out whenever the sidebar or inspector
 /// resizes, which made them jump around.
 enum TitleBar {
@@ -32,7 +32,7 @@ struct WindowConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
             if window.toolbar == nil {
-                window.toolbar = NSToolbar(identifier: "arsip.titlebar")
+                window.toolbar = NSToolbar(identifier: "postquel.titlebar")
             }
             window.toolbar?.showsBaselineSeparator = false
             window.toolbarStyle = .unified

@@ -1,4 +1,4 @@
--- Demo data for trying Arsip: createdb arsip_demo && psql arsip_demo -f scripts/seed-demo.sql
+-- Demo data for trying Postquel: createdb postquel_demo && psql postquel_demo -f scripts/seed-demo.sql
 DROP TABLE IF EXISTS orders, customers, tags CASCADE;
 DROP SCHEMA IF EXISTS analytics CASCADE;
 

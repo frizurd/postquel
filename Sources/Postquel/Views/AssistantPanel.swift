@@ -140,7 +140,7 @@ struct AssistantPanel: View {
         ContentUnavailableView {
             Label("No Coding Agent Found", systemImage: "sparkles")
         } description: {
-            Text("Arsip uses your Claude Code, Codex or Cursor subscription. Install one, sign in once in Terminal (`claude`, `codex` or `cursor-agent login`), then relaunch Arsip.")
+            Text("Postquel uses your Claude Code, Codex or Cursor subscription. Install one, sign in once in Terminal (`claude`, `codex` or `cursor-agent login`), then relaunch Postquel.")
         } actions: {
             Link("Get Claude Code", destination: URL(string: "https://claude.com/claude-code")!)
             Link("Get Codex", destination: URL(string: "https://developers.openai.com/codex/cli")!)
@@ -354,7 +354,7 @@ private struct ProposalCard: View {
         .confirmationDialog("Apply this change to \(model.databaseName)?", isPresented: $confirmingApply) {
             Button("Apply", role: .destructive) { model.apply(call) }
         } message: {
-            Text("It runs in a transaction and commits immediately. This can't be undone from Arsip.")
+            Text("It runs in a transaction and commits immediately. This can't be undone from Postquel.")
         }
     }
 

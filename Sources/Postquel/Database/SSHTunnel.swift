@@ -3,7 +3,7 @@ import Foundation
 
 /// Port forward run by the system `ssh` command: `ssh -N -L <local>:<dbHost>:<dbPort> user@host`.
 /// Authentication is whatever ssh itself can do without prompting — agent keys, ~/.ssh/config,
-/// or an identity file — so Arsip never handles the SSH passphrase.
+/// or an identity file — so Postquel never handles the SSH passphrase.
 final class SSHTunnel {
     let localPort: Int
     private let process = Process()

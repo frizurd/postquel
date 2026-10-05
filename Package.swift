@@ -6,17 +6,17 @@ import PackageDescription
 let libpqPrefix = Context.environment["LIBPQ_PREFIX"] ?? "/Applications/Postgres.app/Contents/Versions/latest"
 
 let package = Package(
-    name: "Arsip",
+    name: "Postquel",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "Arsip", targets: ["Arsip"])
+        .executable(name: "Postquel", targets: ["Postquel"])
     ],
     targets: [
         .systemLibrary(name: "CLibPQ", path: "Sources/CLibPQ"),
         .executableTarget(
-            name: "Arsip",
+            name: "Postquel",
             dependencies: ["CLibPQ"],
-            path: "Sources/Arsip",
+            path: "Sources/Postquel",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
                 .unsafeFlags(["-Xcc", "-I\(libpqPrefix)/include"]),

@@ -201,7 +201,7 @@ struct QueryEditorView: View {
 
     private static func slowQueryPrompt(sql: String, duration: TimeInterval) -> String {
         """
-        This query took \(formatDuration(duration)) in Arsip:
+        This query took \(formatDuration(duration)) in Postquel:
 
         ```sql
         \(sql)

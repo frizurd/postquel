@@ -1,17 +1,17 @@
 import Foundation
 
 /// A small MCP server over stdio (newline-delimited JSON-RPC 2.0) that gives an AI agent
-/// read-only tools for one database. The agent CLI starts it as `Arsip --mcp-server` with the
+/// read-only tools for one database. The agent CLI starts it as `Postquel --mcp-server` with the
 /// connection details in the environment; it opens its own connection.
 final class MCPServer {
     static let launchArgument = "--mcp-server"
 
     enum EnvironmentKey {
-        static let host = "ARSIP_MCP_HOST"
-        static let port = "ARSIP_MCP_PORT"
-        static let user = "ARSIP_MCP_USER"
-        static let database = "ARSIP_MCP_DATABASE"
-        static let password = "ARSIP_MCP_PASSWORD"
+        static let host = "POSTQUEL_MCP_HOST"
+        static let port = "POSTQUEL_MCP_PORT"
+        static let user = "POSTQUEL_MCP_USER"
+        static let database = "POSTQUEL_MCP_DATABASE"
+        static let password = "POSTQUEL_MCP_PASSWORD"
     }
 
     private let connection: PGConnection?
@@ -37,7 +37,7 @@ final class MCPServer {
         var connection: PGConnection?
         var connectError: String?
         do {
-            let opened = try PGConnection.open(config, applicationName: "Arsip AI (read-only)")
+            let opened = try PGConnection.open(config, applicationName: "Postquel AI (read-only)")
             opened.silenceNotices()  // stderr noise like "there is no transaction in progress"
             _ = opened.executeBlocking("SET default_transaction_read_only = on")
             _ = opened.executeBlocking("SET statement_timeout = '30s'")
@@ -69,8 +69,8 @@ final class MCPServer {
             respond(id, result: [
                 "protocolVersion": params["protocolVersion"] as? String ?? "2025-06-18",
                 "capabilities": ["tools": [String: Any]()],
-                "serverInfo": ["name": "arsip", "version": "0.1.0"],
-                "instructions": "Read-only tools for the PostgreSQL database \(databaseLabel), plus tools that open tables and queries in the Arsip window.",
+                "serverInfo": ["name": "postquel", "version": "0.1.0"],
+                "instructions": "Read-only tools for the PostgreSQL database \(databaseLabel), plus tools that open tables and queries in the Postquel window.",
             ])
         case "ping":
             respond(id, result: [String: Any]())
@@ -149,7 +149,7 @@ final class MCPServer {
         ],
         [
             "name": "open_table",
-            "description": "Open a table or view in a new tab in the user's Arsip window, optionally filtered to rows "
+            "description": "Open a table or view in a new tab in the user's Postquel window, optionally filtered to rows "
                 + "where columns equal given values (e.g. one customer's orders). Use this to show data instead of "
                 + "pasting long results.",
             "inputSchema": [
@@ -174,7 +174,7 @@ final class MCPServer {
         ],
         [
             "name": "open_query_tab",
-            "description": "Open SQL in a new query tab in the user's Arsip window for them to review and run. "
+            "description": "Open SQL in a new query tab in the user's Postquel window for them to review and run. "
                 + "It is not executed. Use for longer read queries; use propose_change for changes.",
             "inputSchema": [
                 "type": "object",
@@ -185,7 +185,7 @@ final class MCPServer {
         [
             "name": "propose_change",
             "description": "Propose ONE data or schema change (INSERT, UPDATE, DELETE, MERGE, CREATE, ALTER, DROP, ...) "
-                + "for the user to review. It is NOT applied: Arsip shows it as a card where the user can dry-run it "
+                + "for the user to review. It is NOT applied: Postquel shows it as a card where the user can dry-run it "
                 + "(run in a transaction and roll back) or apply it. Data changes are checked against the schema and "
                 + "the planner's row estimate is returned. For several changes, call once per statement.",
             "inputSchema": [
@@ -229,7 +229,7 @@ final class MCPServer {
             guard let sql = arguments["sql"] as? String, !sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return ("Missing argument: sql", true)
             }
-            return ("Opened a new query tab in Arsip with the SQL. It has not been run; the user decides whether to run it.", false)
+            return ("Opened a new query tab in Postquel with the SQL. It has not been run; the user decides whether to run it.", false)
         default:
             return ("Unknown tool: \(name)", true)
         }
@@ -253,7 +253,7 @@ final class MCPServer {
     private func proposeChange(_ connection: PGConnection, _ sql: String) -> (String, Bool) {
         let keyword = Self.firstKeyword(sql)
         if ["BEGIN", "START", "COMMIT", "END", "ROLLBACK", "ABORT", "SAVEPOINT", "RELEASE"].contains(keyword) {
-            return ("Propose only the change itself. Arsip runs it in its own transaction.", true)
+            return ("Propose only the change itself. Postquel runs it in its own transaction.", true)
         }
         if ["SELECT", "SHOW", "EXPLAIN", "VALUES", "TABLE"].contains(keyword) {
             return ("That's a read query. Use run_query to run it, or open_query_tab to show it.", true)
@@ -271,7 +271,7 @@ final class MCPServer {
             Proposed to the user for review. It has NOT been applied.
             Statement: \(keyword)
             Planner estimate: \(estimate)
-            The user can dry-run it or apply it in Arsip. Don't repeat the SQL in your reply.
+            The user can dry-run it or apply it in Postquel. Don't repeat the SQL in your reply.
             """, false)
     }
 
@@ -292,7 +292,7 @@ final class MCPServer {
         return rows.dropFirst().first ?? rows.first ?? 0
     }
 
-    /// Arsip opens the tab when it sees this succeed, so check everything it will need first.
+    /// Postquel opens the tab when it sees this succeed, so check everything it will need first.
     private func validateOpenTable(_ connection: PGConnection, _ table: String, filters: [[String: Any]]) -> (String, Bool) {
         let lookup = connection.executeBlocking("""
             SELECT n.nspname, c.relname
@@ -320,7 +320,7 @@ final class MCPServer {
             descriptions.append("\(column) = \(filter["value"]!)")
         }
         let filterText = descriptions.isEmpty ? "" : " filtered by " + descriptions.joined(separator: " AND ")
-        return ("Opened \(schema).\(name)\(filterText) in a new tab in Arsip.", false)
+        return ("Opened \(schema).\(name)\(filterText) in a new tab in Postquel.", false)
     }
 
     private func listTables(_ connection: PGConnection, schema: String?) -> (String, Bool) {

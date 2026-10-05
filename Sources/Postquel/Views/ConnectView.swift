@@ -106,7 +106,7 @@ struct ConnectView: View {
                             row("SSH port", value: connection.ssh.port)
                             row("SSH user", text: connection.ssh.user)
                             row("Key file", text: connection.ssh.keyPath, prompt: "~/.ssh/id_ed25519 — leave empty to use your agent")
-                            Text("Arsip runs `ssh -N -L` with your keys or agent. Keys with a passphrase must be unlocked first (`ssh-add`).")
+                            Text("Postquel runs `ssh -N -L` with your keys or agent. Keys with a passphrase must be unlocked first (`ssh-add`).")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
