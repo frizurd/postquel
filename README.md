@@ -23,15 +23,24 @@
 
 Postquel is a prototype and a work in progress.
 
-## Run
+## Download
+
+**[Download Postquel for Mac](https://github.com/frizurd/postquel/releases/latest/download/Postquel.dmg)** — macOS 15 or later, Apple silicon and Intel. Signed and notarized by Apple.
+
+Open the DMG and drag Postquel to Applications. For the assistant, install and sign in to [Claude Code](https://claude.com/claude-code), [Codex](https://developers.openai.com/codex/cli) or [Cursor Agent](https://cursor.com/cli). Release notes are on the [releases page](https://github.com/frizurd/postquel/releases).
+
+## Build from source
 
 Requires Xcode / Swift 6 and libpq (defaults to Postgres.app; set `LIBPQ_PREFIX` for Homebrew `libpq`).
 
 ```sh
 ./scripts/build-app.sh --install   # build, install to /Applications, relaunch if running
 ./scripts/dev.sh                   # watch mode: rebuild + reinstall + relaunch on every change
+./scripts/build-dmg.sh             # universal app in a DMG, for distribution
 swift run                          # run without bundling
 ```
+
+The app bundles libpq and the OpenSSL libraries it uses (from Postgres.app, or `LIBPQ_PREFIX`), so it runs on Macs without Postgres installed. To sign and notarize a DMG, set `DEVELOPER_ID` to a "Developer ID Application" identity and `NOTARY_PROFILE` to a profile saved with `xcrun notarytool store-credentials`; see `scripts/build-dmg.sh`.
 
 Demo data: `createdb postquel_demo && psql postquel_demo -f scripts/seed-demo.sql`
 
@@ -39,6 +48,7 @@ Demo data: `createdb postquel_demo && psql postquel_demo -f scripts/seed-demo.sq
 
 - `Resources/AppIcon.png` – silver icon on dark graphite; the app build generates all macOS icon sizes
 - `Resources/Logo.png` – silver mark with a transparent background
+- `Resources/Licenses` – notices for the bundled libpq and OpenSSL, copied into the app
 - `Sources/CLibPQ` – module map for libpq
 - `Sources/Postquel/Database` – `PGConnection` (libpq on a serial queue, text results, cancel)
 - `Sources/Postquel/Models` – session, table browser, query editor state
